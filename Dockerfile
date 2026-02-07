@@ -12,6 +12,7 @@ RUN npm ci --only=production
 # Copy application files
 COPY server.js ./
 COPY wasm/ ./wasm/
+COPY public/ ./public/
 
 # Create models directory
 RUN mkdir -p /app/models

@@ -6,6 +6,7 @@ services:
       - "13000:3000"
     volumes:
       - ./models:/app/models
+      - ./public:/app/public
     environment:
       API_KEY: ""
       NODE_ENV: production
