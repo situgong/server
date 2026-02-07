@@ -18,8 +18,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import vm from 'vm';
-import franc from 'franc';
-import cld3 from 'cld3';
+import { franc } from 'franc';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -135,28 +134,30 @@ function translate(model, text) {
 }
 
 function detectLanguage(text) {
-    if (!text || text.trim().length === 0) return 'en';
+    if (!text || text.trim().length < 3) return 'en';
 
-    // Use cld3 for detection (fast and accurate)
-    const result = cld3.getLanguage(text);
-    if (result.isReliable) {
-        let code = result.language;
-        // CLD3 uses 'zh' for Chinese, 'jpn' for Japanese, etc.
-        return code;
-    }
-
-    // Fallback to franc for better short text detection
-    const francResult = franc(text, { minLength: 3 });
-    if (francResult !== 'und') {
+    // Use franc for detection
+    const result = franc(text, { minLength: 3 });
+    if (result !== 'und') {
+        // Map 3-letter codes to 2-letter ISO 639-1
         const codeMap = {
             'eng': 'en', 'zho': 'zh', 'jpn': 'jp', 'kor': 'ko',
             'fra': 'fr', 'deu': 'de', 'spa': 'es', 'rus': 'ru',
             'por': 'pt', 'ita': 'it', 'nld': 'nl', 'pol': 'pl',
+            'ara': 'ar', 'hin': 'hi', 'tha': 'th', 'vie': 'vi',
         };
-        return codeMap[francResult] || francResult.slice(0, 2);
+        return codeMap[result] || result.slice(0, 2);
     }
 
-    return 'en'; // Default fallback
+    // Simple heuristic fallback
+    const cjkRegex = /[\u4e00-\u9fff\uac00-\ud7af\u3040-\u309f\u30a0-\u30ff]/;
+    if (cjkRegex.test(text)) {
+        if (text.match(/[\u3040-\u309f\u30a0-\u30ff]/)) return 'jp';
+        if (text.match(/[\uac00-\ud7af]/)) return 'ko';
+        return 'zh';
+    }
+
+    return 'en';
 }
 
 // Simple language code to name mapping for HCFY
