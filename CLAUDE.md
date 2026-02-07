@@ -31,6 +31,7 @@ wasm/              - Bergamot WASM files
 models/            - Translation model directories (e.g., en-zh/, zh-en/)
 public/            - Web UI and Swagger documentation
   index.html       - Translation web UI
+  monitor.html     - Monitor page (translation logs, system resources)
   openapi.json     - OpenAPI 3.0 specification
 ```
 
@@ -63,6 +64,11 @@ public/            - Web UI and Swagger documentation
 | `GET /` | - | Web UI (Translation interface) |
 | `GET /docs/` | - | Swagger API Documentation |
 | `GET /openapi.json` | - | OpenAPI 3.0 spec |
+| `GET /monitor.html` | - | Monitor page (logs, system stats) |
+| `GET /monitor/logs` | `?limit=N` | Translation logs |
+| `GET /monitor/stats` | - | Log statistics, server uptime |
+| `GET /monitor/system` | - | Memory (heap, RSS), CPU usage |
+| `POST /monitor/clear` | - | Clear translation logs |
 | `POST /translate` | `{text, from?, to}` | `{text, from, to}` |
 | `POST /kiss` | `{text, from?, to}` | `{text, from, to}` |
 | `POST /imme` | `{source_lang?, target_lang, text_list[]}` | `{translations[]}` |

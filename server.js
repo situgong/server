@@ -17,6 +17,7 @@ import cors from 'cors';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import vm from 'vm';
 import { franc } from 'franc';
@@ -657,7 +658,7 @@ app.post('/monitor/clear', (req, res) => {
 // Get system stats (CPU, memory)
 app.get('/monitor/system', (req, res) => {
     const memUsage = process.memoryUsage();
-    const os = require('os');
+    const cpuUsage = process.cpuUsage();
     res.json({
         memory: {
             heapUsed: memUsage.heapUsed,
@@ -667,8 +668,8 @@ app.get('/monitor/system', (req, res) => {
             unit: 'bytes',
         },
         cpu: {
-            loadAvg: os.loadavg(),
-            unit: '1/5/15 min load average',
+            usage: cpuUsage,
+            unit: 'microseconds (user/system)',
         },
         processUptime: process.uptime(),
     });

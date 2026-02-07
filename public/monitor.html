@@ -336,6 +336,40 @@
 
         <div class="card">
             <div class="card-header">
+                <h2 class="card-title">System Resources</h2>
+                <div>
+                    <span class="refresh-info">Manual</span>
+                    <button class="btn btn-secondary" onclick="fetchSystemStats()" style="margin-left: 10px;">Refresh</button>
+                </div>
+            </div>
+            <div class="system-grid">
+                <div class="system-card">
+                    <div class="system-label">Memory (Heap)</div>
+                    <div class="system-value" id="memHeap">0 MB</div>
+                    <div class="system-bar">
+                        <div class="system-bar-fill" id="memHeapBar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="system-card">
+                    <div class="system-label">Memory (RSS)</div>
+                    <div class="system-value" id="memRss">0 MB</div>
+                    <div class="system-bar">
+                        <div class="system-bar-fill" id="memRssBar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="system-card">
+                    <div class="system-label">CPU Usage</div>
+                    <div class="system-value" id="cpuUsage">0 ms</div>
+                    <div style="font-size: 0.8em; color: #666; margin-top: 5px;">
+                        <span id="cpuUser">User: 0ms</span> |
+                        <span id="cpuSystem">System: 0ms</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
                 <h2 class="card-title">Translation Log</h2>
                 <div>
                     <span class="refresh-info">Auto-refresh: 2s</span>
@@ -516,9 +550,49 @@
             }
         }
 
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+        }
+
+        async function fetchSystemStats() {
+            try {
+                const response = await fetch(`${API_BASE}/monitor/system`);
+                if (response.ok) {
+                    const data = await response.json();
+
+                    // Memory Heap
+                    const heapUsed = data.memory.heapUsed;
+                    const heapTotal = data.memory.heapTotal;
+                    const heapPercent = heapTotal > 0 ? Math.round((heapUsed / heapTotal) * 100) : 0;
+                    document.getElementById('memHeap').textContent = formatBytes(heapUsed);
+                    document.getElementById('memHeapBar').style.width = Math.min(heapPercent, 100) + '%';
+
+                    // Memory RSS
+                    const rss = data.memory.rss;
+                    document.getElementById('memRss').textContent = formatBytes(rss);
+                    // Estimate RSS bar (assuming 2GB max for visualization)
+                    const rssPercent = Math.min((rss / (2 * 1024 * 1024 * 1024)) * 100, 100);
+                    document.getElementById('memRssBar').style.width = rssPercent + '%';
+
+                    // CPU Usage
+                    const cpu = data.cpu.usage;
+                    const cpuTotal = cpu.user + cpu.system;
+                    document.getElementById('cpuUsage').textContent = (cpuTotal / 1000000).toFixed(2) + ' ms';
+                    document.getElementById('cpuUser').textContent = 'User: ' + (cpu.user / 1000000).toFixed(1) + 'ms';
+                    document.getElementById('cpuSystem').textContent = 'System: ' + (cpu.system / 1000000).toFixed(1) + 'ms';
+                }
+            } catch (err) {
+                console.error('Failed to fetch system stats:', err.message);
+            }
+        }
+
         // Initial load
         fetchStats();
         fetchLogs();
+        fetchSystemStats();
 
         // Auto refresh
         setInterval(fetchLogs, 2000);

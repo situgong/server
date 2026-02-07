@@ -60,6 +60,7 @@ After starting the server, access:
 
 - **Translation UI**: http://127.0.0.1:13000/ - Browser-based translation interface
 - **API Documentation**: http://127.0.0.1:13000/docs/ - Swagger UI for all API endpoints
+- **Monitor**: http://127.0.0.1:13000/monitor.html - Real-time translation log and system resources monitoring
 
 ## Deployment
 
@@ -292,6 +293,12 @@ Response:
 ```
 GET /health
 ```
+
+**System Stats (Monitor)**
+```
+GET /monitor/system
+```
+Returns memory usage (heap, RSS, external) and CPU usage in microseconds.
 
 ## Authentication
 
