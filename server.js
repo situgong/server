@@ -152,6 +152,63 @@ const langCodeMap = {
     '葡萄牙语': 'pt',
 };
 
+// ============== Translation Log (20-minute sliding window) ==============
+
+const LOG_RETENTION_MS = 20 * 60 * 1000; // 20 minutes
+const translationLog = {
+    entries: [], // Circular buffer: { timestamp, from, to, source, translated }
+    maxSize: 1000, // Maximum entries to keep
+
+    add(entry) {
+        const now = Date.now();
+        // Clean old entries
+        this.clean(now);
+        // Add new entry
+        this.entries.push({
+            timestamp: now,
+            from: entry.from,
+            to: entry.to,
+            source: entry.source?.substring(0, 500) || '', // Truncate long texts
+            translated: entry.translated?.substring(0, 500) || '',
+        });
+        // Keep size limited
+        if (this.entries.length > this.maxSize) {
+            this.entries = this.entries.slice(-this.maxSize);
+        }
+    },
+
+    clean(now) {
+        const cutoff = now - LOG_RETENTION_MS;
+        // Remove entries older than 20 minutes
+        while (this.entries.length > 0 && this.entries[0].timestamp < cutoff) {
+            this.entries.shift();
+        }
+    },
+
+    getRecent(limit = 100) {
+        this.clean(Date.now());
+        const start = Math.max(0, this.entries.length - limit);
+        return this.entries.slice(start);
+    },
+
+    getStats() {
+        this.clean(Date.now());
+        const now = Date.now();
+        const recent = this.entries.filter(e => now - e.timestamp < 60000); // Last minute
+        return {
+            totalEntries: this.entries.length,
+            lastMinute: recent.length,
+            oldestEntry: this.entries[0]?.timestamp || null,
+            newestEntry: this.entries[this.entries.length - 1]?.timestamp || null,
+        };
+    }
+};
+
+// Helper function to log translations
+function logTranslation(from, to, source, translated) {
+    translationLog.add({ from, to, source, translated });
+}
+
 // ============== Helpers ==============
 
 function normalizePath(p) {
@@ -563,6 +620,40 @@ app.get('/health', (req, res) => {
     });
 });
 
+// ============== Monitor API ==============
+
+// Get recent translation logs
+app.get('/monitor/logs', (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const logs = translationLog.getRecent(limit);
+    res.json({
+        logs: logs.map(l => ({
+            timestamp: l.timestamp,
+            from: l.from,
+            to: l.to,
+            source: l.source,
+            translated: l.translated,
+        })),
+        count: logs.length,
+    });
+});
+
+// Get log statistics
+app.get('/monitor/stats', (req, res) => {
+    const stats = translationLog.getStats();
+    res.json({
+        ...stats,
+        retentionMinutes: 20,
+        serverUptime: process.uptime(),
+    });
+});
+
+// Clear logs (admin)
+app.post('/monitor/clear', (req, res) => {
+    translationLog.entries = [];
+    res.json({ success: true });
+});
+
 // Language detection
 app.post('/detect', checkAuth, (req, res) => {
     const { text } = req.body;
@@ -580,6 +671,7 @@ app.post('/translate', checkAuth, async (req, res) => {
     try {
         const model = await getModel(fromLang, to);
         const result = doTranslate(model, text);
+        logTranslation(fromLang, to, text, result);
         res.json({ text: result, from: fromLang, to });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -596,6 +688,7 @@ app.post('/kiss', checkAuth, async (req, res) => {
     try {
         const model = await getModel(fromLang, to);
         const result = doTranslate(model, text);
+        logTranslation(fromLang, to, text, result);
         res.json({ text: result, from: fromLang, to });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -613,9 +706,11 @@ app.post('/imme', checkAuth, async (req, res) => {
         const model = await getModel(fromLang, target_lang);
         const translations = [];
         for (const text of text_list) {
+            const result = doTranslate(model, text);
+            logTranslation(fromLang, target_lang, text, result);
             translations.push({
                 detected_source_lang: fromLang,
-                text: doTranslate(model, text),
+                text: result,
             });
         }
 
@@ -658,6 +753,7 @@ app.post('/hcfy', checkAuth, async (req, res) => {
     try {
         const model = await getModel(srcIso, tgtIso);
         const result = doTranslate(model, text);
+        logTranslation(srcIso, tgtIso, text, result);
         res.json({ text, from: srcName, to: destination[0], result: [result] });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -677,6 +773,7 @@ app.post('/deeplx', checkAuth, async (req, res) => {
     try {
         const model = await getModel(fromLang, toLang);
         const result = doTranslate(model, text);
+        logTranslation(fromLang, toLang, text, result);
         res.json({
             code: 200,
             id: Date.now(),
@@ -706,6 +803,7 @@ app.post('/translate_mtranserver', async (req, res) => {
         const normalizedTo = normalizeLanguageCode(to);
 
         const result = await translateWithPivot(normalizedFrom, normalizedTo, text, html || false);
+        logTranslation(normalizedFrom, normalizedTo, text, result);
         res.json({ result });
     } catch (err) {
         console.error('[Server] MTranServer translate error:', err);
@@ -730,6 +828,7 @@ app.post('/translate_mtranserver/batch', async (req, res) => {
         const results = [];
         for (const text of texts) {
             const result = await translateWithPivot(normalizedFrom, normalizedTo, text, html || false);
+            logTranslation(normalizedFrom, normalizedTo, text, result);
             results.push(result);
         }
         res.json({ results });
