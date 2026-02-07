@@ -29,6 +29,9 @@ wasm/              - Bergamot WASM files
   bergamot-translator.wasm  - WASM binary (compiled C++)
   bergamot-translator.js    - Emscripten glue code with embind bindings
 models/            - Translation model directories (e.g., en-zh/, zh-en/)
+public/            - Web UI and Swagger documentation
+  index.html       - Translation web UI
+  openapi.json     - OpenAPI 3.0 specification
 ```
 
 ### Key Implementation Details
@@ -57,6 +60,9 @@ models/            - Translation model directories (e.g., en-zh/, zh-en/)
 
 | Endpoint | Request | Response |
 |----------|---------|----------|
+| `GET /` | - | Web UI (Translation interface) |
+| `GET /docs/` | - | Swagger API Documentation |
+| `GET /openapi.json` | - | OpenAPI 3.0 spec |
 | `POST /translate` | `{text, from?, to}` | `{text, from, to}` |
 | `POST /kiss` | `{text, from?, to}` | `{text, from, to}` |
 | `POST /imme` | `{source_lang?, target_lang, text_list[]}` | `{translations[]}` |

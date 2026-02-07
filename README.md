@@ -18,6 +18,8 @@ While searching for similar projects, I found Mozilla's [translation-service](ht
 - 🚀 Built on Node.js >= 18 for simplicity and broad compatibility
 - 🔄 Based on [Bergamot Translator](https://github.com/browsermt/bergamot-translator) WASM engine used in Firefox
 - 🧠 Compatible with [Firefox Translations Models](https://github.com/mozilla/firefox-translations-models/)
+- 🌐 Browser-based translation UI (no API tools needed)
+- 📚 Interactive API documentation via Swagger UI
 - 🔍 Built-in language detection with automatic source language identification
 - 💾 On-demand model loading with memory optimization (only one model active at a time)
 - 🔀 Pivot translation via English when direct model unavailable
@@ -51,6 +53,13 @@ npm start
 # Development with hot reload
 npm run dev
 ```
+
+## Web Interface
+
+After starting the server, access:
+
+- **Translation UI**: http://127.0.0.1:3000/ - Browser-based translation interface
+- **API Documentation**: http://127.0.0.1:3000/docs/ - Swagger UI for all API endpoints
 
 ## Deployment
 
