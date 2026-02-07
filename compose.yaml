@@ -3,7 +3,7 @@ services:
     build: .
     container_name: linguaspark-translation
     ports:
-      - "3000:3000"
+      - "13000:3000"
     volumes:
       - ./models:/app/models
     environment:
