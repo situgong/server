@@ -580,75 +580,62 @@ async function initBergamot() {
 }
 
 async function loadInitialModels() {
-    try {
-        const entries = await fs.readdir(CONFIG.MODELS_DIR, { withFileTypes: true });
-        let loaded = 0;
-        let failed = 0;
+    const entries = await fs.readdir(CONFIG.MODELS_DIR, { withFileTypes: true });
+    let loaded = 0;
 
-        for (const entry of entries) {
-            if (entry.isDirectory()) {
-                // Parse directory name (supports "enzh", "en-zh", "enja", "en-ja")
-                let from, to;
-                const name = entry.name;
+    for (const entry of entries) {
+        if (entry.isDirectory()) {
+            // Parse directory name (supports "enzh", "en-zh", "enja", "en-ja")
+            let from, to;
+            const name = entry.name;
 
-                if (name.includes('-')) {
-                    [from, to] = name.split('-');
-                } else if (name.length >= 4) {
-                    from = name.slice(0, 2);
-                    to = name.slice(2, 4);
-                } else {
-                    continue; // Skip invalid directory names
-                }
-
-                const dir = path.join(CONFIG.MODELS_DIR, entry.name);
-
-                try {
-                    const dir = path.join(CONFIG.MODELS_DIR, entry.name);
-                    const key = `${from}-${to}`;
-
-                    if (loadedModels.has(key)) {
-                        console.log(`[Server] Model ${key} already loaded`);
-                        continue;
-                    }
-
-                    // Load model files (also validates they exist)
-                    const buffers = await loadModelFiles(dir);
-                    const aligned = {};
-                    const alignments = { model: 256, lex: 64, srcvocab: 64, trgvocab: 64 };
-                    for (const [k, buf] of Object.entries(buffers)) {
-                        aligned[k] = createAlignedMemory(buf, alignments[k]);
-                    }
-
-                    const vocabList = new bergamotModule.AlignedMemoryList();
-                    vocabList.push_back(aligned.srcvocab);
-                    vocabList.push_back(aligned.trgvocab);
-
-                    const config = [
-                        'beam-size: 1', 'normalize: 1.0', 'word-penalty: 0',
-                        'max-length-break: 512', 'mini-batch-words: 1024', 'workspace: 128',
-                        'max-length-factor: 2.0', 'skip-cost: true', 'cpu-threads: 0',
-                        'quiet: true', 'quiet-translation: true',
-                        'gemm-precision: int8shiftAlphaAll', 'alignment: soft'
-                    ].join('\n');
-
-                    const model = new bergamotModule.TranslationModel(from, to, config, aligned.model, aligned.lex, vocabList, null);
-                    const service = new bergamotModule.BlockingService({ cacheSize: 0 });
-
-                    loadedModels.set(key, { instance: model, service, from, to });
-                    console.log(`[Server] Loaded model: ${key}`);
-                    loaded++;
-
-                } catch (err) {
-                    console.log(`[Server] Skipping ${entry.name}: ${err.message}`);
-                    failed++;
-                }
+            if (name.includes('-')) {
+                [from, to] = name.split('-');
+            } else if (name.length >= 4) {
+                from = name.slice(0, 2);
+                to = name.slice(2, 4);
+            } else {
+                continue; // Skip invalid directory names
             }
-        }
 
-        console.log(`[Server] Initial models: ${loaded} loaded, ${failed} skipped`);
-    } catch (err) {
-        console.log(`[Server] No initial models to load: ${err.message}`);
+            const dir = path.join(CONFIG.MODELS_DIR, entry.name);
+            const key = `${from}-${to}`;
+
+            if (loadedModels.has(key)) {
+                console.log(`[Server] Model ${key} already loaded`);
+                continue;
+            }
+
+            // Load model files (also validates they exist)
+            const buffers = await loadModelFiles(dir);
+            const aligned = {};
+            const alignments = { model: 256, lex: 64, srcvocab: 64, trgvocab: 64 };
+            for (const [k, buf] of Object.entries(buffers)) {
+                aligned[k] = createAlignedMemory(buf, alignments[k]);
+            }
+
+            const vocabList = new bergamotModule.AlignedMemoryList();
+            vocabList.push_back(aligned.srcvocab);
+            vocabList.push_back(aligned.trgvocab);
+
+            const config = [
+                'beam-size: 1', 'normalize: 1.0', 'word-penalty: 0',
+                'max-length-break: 512', 'mini-batch-words: 1024', 'workspace: 128',
+                'max-length-factor: 2.0', 'skip-cost: true', 'cpu-threads: 0',
+                'quiet: true', 'quiet-translation: true',
+                'gemm-precision: int8shiftAlphaAll', 'alignment: soft'
+            ].join('\n');
+
+            const model = new bergamotModule.TranslationModel(from, to, config, aligned.model, aligned.lex, vocabList, null);
+            const service = new bergamotModule.BlockingService({ cacheSize: 0 });
+
+            loadedModels.set(key, { instance: model, service, from, to });
+            console.log(`[Server] Loaded model: ${key}`);
+            loaded++;
+        }
     }
+
+    console.log(`[Server] Initial models: ${loaded} loaded`);
 }
 
 // ============== Start Server ==============
@@ -658,16 +645,15 @@ async function start() {
         // Initialize Bergamot
         bergamotModule = await initBergamot();
 
+        // Load all models from models directory - server will not start if any model fails
+        await loadInitialModels();
+
         // Start Express server
         app.listen(CONFIG.PORT, CONFIG.IP, () => {
             console.log(`[Server] LinguaSpark listening on http://${CONFIG.IP}:${CONFIG.PORT}`);
             console.log(`[Server] Models directory: ${CONFIG.MODELS_DIR}`);
-            console.log(`[Server] Models loaded on-demand (use POST /models/load to preload)`);
             if (CONFIG.API_KEY) console.log(`[Server] API key protection enabled`);
         });
-
-        // Don't load all models at startup - they will be loaded on-demand
-        // Use POST /models/load to preload specific models
 
     } catch (err) {
         console.error('[Server] Failed to start:', err);
