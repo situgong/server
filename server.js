@@ -107,8 +107,16 @@ async function loadModelFiles(modelPath) {
     for (const entry of entries) {
         const name = entry.name.toLowerCase();
         if (name.endsWith('.spm')) {
-            if (name.startsWith('srcvocab')) files.srcvocab = await fs.readFile(path.join(modelPath, entry.name));
-            else if (name.startsWith('trgvocab')) files.trgvocab = await fs.readFile(path.join(modelPath, entry.name));
+            // Handle both srcvocab/trgvocab and vocab naming patterns
+            if (name.startsWith('srcvocab') || (name === 'vocab.spm' && !files.srcvocab)) {
+                files.srcvocab = await fs.readFile(path.join(modelPath, entry.name));
+            } else if (name.startsWith('trgvocab') || (name.startsWith('vocab') && !files.trgvocab && name !== 'vocab.spm')) {
+                files.trgvocab = await fs.readFile(path.join(modelPath, entry.name));
+            } else if (name.includes('vocab') && !files.srcvocab && !files.trgvocab) {
+                // If neither is set yet, first vocab is src, second is trg
+                if (!files.srcvocab) files.srcvocab = await fs.readFile(path.join(modelPath, entry.name));
+                else files.trgvocab = await fs.readFile(path.join(modelPath, entry.name));
+            }
         } else if (name.endsWith('.bin')) {
             if (name.includes('s2t') || name.includes('lex')) files.lex = await fs.readFile(path.join(modelPath, entry.name));
             else if (name.includes('model') || name.includes('intgemm')) files.model = await fs.readFile(path.join(modelPath, entry.name));
@@ -116,7 +124,7 @@ async function loadModelFiles(modelPath) {
     }
 
     if (!files.model || !files.lex || !files.srcvocab || !files.trgvocab) {
-        throw new Error(`Missing model files in ${modelPath}`);
+        throw new Error(`Missing model files in ${modelPath}. Found: ${Object.keys(files).join(', ')}`);
     }
     return files;
 }
@@ -452,8 +460,14 @@ async function loadInitialModels() {
         const entries = await fs.readdir(CONFIG.MODELS_DIR, { withFileTypes: true });
         for (const entry of entries) {
             if (entry.isDirectory() && entry.name.length >= 4) {
-                const from = entry.name.slice(0, 2);
-                const to = entry.name.slice(2, 4);
+                // Handle both "enzh", "en-zh", "enja", "en-ja" naming conventions
+                let from, to;
+                if (entry.name.includes('-')) {
+                    [from, to] = entry.name.split('-');
+                } else {
+                    from = entry.name.slice(0, 2);
+                    to = entry.name.slice(2, 4);
+                }
                 const dir = path.join(CONFIG.MODELS_DIR, entry.name);
                 try {
                     await loadModelFiles(dir);
