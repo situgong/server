@@ -19,12 +19,15 @@ While searching for similar projects, I found Mozilla's [translation-service](ht
 - 🔄 Based on [Bergamot Translator](https://github.com/browsermt/bergamot-translator) WASM engine used in Firefox
 - 🧠 Compatible with [Firefox Translations Models](https://github.com/mozilla/firefox-translations-models/)
 - 🔍 Built-in language detection with automatic source language identification
-- 🔌 Supports multiple translation API formats:
+- 💾 On-demand model loading with memory optimization (only one model active at a time)
+- 🔀 Pivot translation via English when direct model unavailable
+- 🔌 Multiple translation API compatibility:
   - Native API
   - [Immersive Translate](https://immersivetranslate.com/) API
   - [Kiss Translator](https://www.kis-translator.com/) API
   - [HCFY](https://hcfy.app/) API
   - [DeepLX](https://github.com/OwO-Network/DeepLX) API
+  - MTranServer API (single and batch)
 - 🔑 API key protection support
 
 ## Tech Stack
@@ -110,24 +113,24 @@ docker compose up -d
 
 ```
 models/
-├── enzh/  # English to Chinese
+├── en-zh/  # English to Chinese
 │   ├── model.intgemm8.bin  # Translation model
 │   ├── model.s2t.bin       # Shortlist file
-│   ├── srcvocab.spm        # Source vocabulary
-│   └── trgvocab.spm        # Target vocabulary
-└── zhen/  # Chinese to English
+│   ├── srcvocab.xxen.spm    # Source vocabulary
+│   └── trgvocab.xxen.spm    # Target vocabulary
+└── zh-en/  # Chinese to English
     └── ...
 ```
 
 ### Directory Naming Convention
 
-Model directories use `[source][target]` format with [ISO 639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes):
-- `en-zh` - English to Chinese
-- `zh-en` - Chinese to English
+Model directories use `[source]-[target]` or `[source][target]` format with [ISO 639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes):
+- `en-zh` or `enzh` - English to Chinese
+- `zh-en` or `zhen` - Chinese to English
 - `en-ja` - English to Japanese
 - `ja-en` - Japanese to English
 
-The service auto-loads all model directories on startup.
+The service auto-discovers all model directories on startup.
 
 ## Environment Variables
 
@@ -233,6 +236,46 @@ POST /deeplx
   "text": "Hello world",
   "source_lang": "EN",
   "target_lang": "ZH"
+}
+```
+
+**MTranServer API (Single)**
+```
+POST /translate_mtranserver
+```
+```json
+{
+  "from": "en",
+  "to": "zh",
+  "text": "Hello world",
+  "html": false
+}
+```
+
+Response:
+```json
+{
+  "result": "你好世界"
+}
+```
+
+**MTranServer API (Batch)**
+```
+POST /translate_mtranserver/batch
+```
+```json
+{
+  "from": "en",
+  "to": "zh",
+  "texts": ["Hello world", "How are you?"],
+  "html": false
+}
+```
+
+Response:
+```json
+{
+  "results": ["你好世界", "你好吗?"]
 }
 ```
 

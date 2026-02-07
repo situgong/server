@@ -28,22 +28,28 @@ server.js          - Main Express server (all endpoints, WASM loading, model man
 wasm/              - Bergamot WASM files
   bergamot-translator.wasm  - WASM binary (compiled C++)
   bergamot-translator.js    - Emscripten glue code with embind bindings
-models/            - Translation model directories
+models/            - Translation model directories (e.g., en-zh/, zh-en/)
 ```
 
 ### Key Implementation Details
 
-**WASM Loading**: The Bergamot WASM module is loaded into a VM sandbox at server startup (`server.js:36-60`). This is required because Emscripten's embind generates browser-specific code.
+**WASM Loading**: The Bergamot WASM module is loaded into a VM sandbox at server startup (`server.js:36-89`). Emscripten's embind requires browser APIs, so a VM sandbox is used.
 
 **Model Management**:
-- Models are stored in `models/{langPair}/` directories (e.g., `enzh/`, `zhen/`)
-- Auto-loaded on startup from directories in `MODELS_DIR`
-- Can also be loaded dynamically via `POST /models/load`
-- Models are cached in memory (`loadedModels` Map)
+- Models stored in `models/{from}-{to}/` directories (e.g., `enzh/`, `en-zh/`, `zh-en/`)
+- Supports both `enzh` and `en-zh` directory naming conventions
+- Auto-discovered on startup from directories in `MODELS_DIR`
+- On-demand loading via `POST /models/load`
+- Loading locks prevent duplicate concurrent loads (`loadingLocks` Map)
+- Buffer preloading for faster first translation
+- Models cached in memory (`availableModels` Map)
+- Only one active model at a time (WASM memory constraint)
 
-**Language Detection**: Uses `franc` library with CJK character fallback heuristics (`server.js:158-183`)
+**Pivot Translation**: Supports translation via English when direct model is unavailable (`server.js:188-224`)
 
-**Language Name Mapping**: Supports both ISO 639-1 codes and human-readable names:
+**Language Detection**: Uses `franc` library with CJK character fallback heuristics (`server.js:454-479`)
+
+**Language Name Mapping**: Supports ISO 639-1 codes and human-readable names:
 - `中文(简体)` → `zh`, `中文(繁体)` → `zh_Hant`
 - English names like `chinese`, `japanese`, etc.
 
@@ -57,9 +63,11 @@ models/            - Translation model directories
 | `POST /hcfy` | `{text, source?, destination[]}` | `{text, from, to, result[]}` |
 | `POST /deeplx` | `{text, source_lang, target_lang}` | `{code: 200, data, ...}` |
 | `POST /detect` | `{text}` | `{language}` |
-| `GET /health` | - | `{status, bergamotLoaded, loadedModels}` |
+| `GET /health` | - | `{status, bergamotLoaded, availableModels}` |
 | `GET /models` | - | `{models[]}` |
 | `POST /models/load` | `{from, to, modelDir?}` | `{success, key, from, to}` |
+| `POST /translate_mtranserver` | `{from, to, text, html?}` | `{result}` |
+| `POST /translate_mtranserver/batch` | `{from, to, texts[], html?}` | `{results[]}` |
 
 ## Environment Variables
 
@@ -78,10 +86,12 @@ When `API_KEY` is set, use header `Authorization: Bearer <key>` or query `?token
 
 ## Model Files
 
-Model directory naming: `{fromLang}{toLang}` (e.g., `enzh`, `zhen`, `enja`)
+Model directory naming: `{from}-{to}` (e.g., `en-zh`, `zh-en`, `en-ja`) or `{fromLang}{toLang}` (e.g., `enzh`, `zhen`)
 
 Expected files:
-- `model.intgemm8.bin` or `model.bin` - Translation model
-- `model.s2t.bin` or `model.lex.bin` - Shortlist lexicon
-- `srcvocab.spm` or `vocab.spm` - Source vocabulary
-- `trgvocab.spm` or `vocab.spm` - Target vocabulary
+- `model.intgemm8.bin`, `model.intgemm.alphas.bin`, or `model.bin` - Translation model
+- `model.s2t.bin`, `lex.50.50.s2t.bin`, or `lex.bin` - Shortlist lexicon
+- `srcvocab.xxen.spm` or `vocab.xxen.spm` - Source vocabulary
+- `trgvocab.xxen.spm` or `vocab.xxen.spm` - Target vocabulary
+
+Single `vocab.spm` file can be used for both source and target vocabulary.

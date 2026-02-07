@@ -1,5 +1,4 @@
 /target
-/models
 /.cargo_local
 /.cargo_local/**
 Cargo.lock
