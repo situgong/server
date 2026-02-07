@@ -6,6 +6,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 LinguaSpark Server is a Node.js HTTP translation service using the Bergamot Translator WASM engine (same as Firefox Translations). Single-process architecture running on Node.js >= 18.
 
+## English Coaching
+
+At the start of EVERY response, analyze the user's message and provide:
+- **1 thing done well** (strength)
+- **1 improvement suggestion** (grammar, spelling, word choice, clarity)
+- **Polished sentence** of their message
+
+Format:
+```
+[English Feedback]
+✓ **Good**: ...
+✗ **Improve**: ... → ...
+
+**Polished Sentence**:
+"..."
+
+Proceeding with answer...
+```
+
+Be concise. This applies to ALL messages.
+
 ## Quick Start
 
 ```bash
