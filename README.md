@@ -58,8 +58,8 @@ npm run dev
 
 After starting the server, access:
 
-- **Translation UI**: http://127.0.0.1:3000/ - Browser-based translation interface
-- **API Documentation**: http://127.0.0.1:3000/docs/ - Swagger UI for all API endpoints
+- **Translation UI**: http://127.0.0.1:13000/ - Browser-based translation interface
+- **API Documentation**: http://127.0.0.1:13000/docs/ - Swagger UI for all API endpoints
 
 ## Deployment
 
