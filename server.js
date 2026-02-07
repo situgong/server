@@ -68,8 +68,22 @@ app.use(express.json());
 let bergamotModule = null;
 const loadedModels = new Map(); // key: "from-to", value: { instance, service, from, to }
 const langCodeMap = {
+    // Chinese names
     '中文(简体)': 'zh',
     '中文(繁体)': 'zh_Hant',
+    '简体中文': 'zh',
+    '繁体中文': 'zh_Hant',
+    // English names
+    'english': 'en',
+    'chinese': 'zh',
+    'japanese': 'jp',
+    'korean': 'ko',
+    'french': 'fr',
+    'german': 'de',
+    'spanish': 'es',
+    'russian': 'ru',
+    'portuguese': 'pt',
+    // Other common mappings
     '英语': 'en',
     '日语': 'jp',
     '韩语': 'ko',
@@ -137,7 +151,7 @@ function detectLanguage(text) {
     if (!text || text.trim().length < 3) return 'en';
 
     // Use franc for detection
-    const result = franc(text, { minLength: 3 });
+    const result = franc(text, { minLength: 3, whitelisted: ['eng', 'zho', 'jpn', 'kor', 'fra', 'deu', 'spa', 'rus', 'por'] });
     if (result !== 'und') {
         // Map 3-letter codes to 2-letter ISO 639-1
         const codeMap = {
@@ -149,7 +163,7 @@ function detectLanguage(text) {
         return codeMap[result] || result.slice(0, 2);
     }
 
-    // Simple heuristic fallback
+    // Simple heuristic fallback for CJK
     const cjkRegex = /[\u4e00-\u9fff\uac00-\ud7af\u3040-\u309f\u30a0-\u30ff]/;
     if (cjkRegex.test(text)) {
         if (text.match(/[\u3040-\u309f\u30a0-\u30ff]/)) return 'jp';
@@ -275,16 +289,33 @@ app.post('/hcfy', checkAuth, async (req, res) => {
     const { text, source, destination } = req.body;
     if (!text || !destination) return res.status(400).json({ error: 'Missing text or destination' });
 
-    const srcName = source || '英语';
+    const srcName = source || 'english';
     const srcLang = convertLangName(srcName);
-    let tgtLang = convertLangName(destination[0] || '中文(简体)');
+    let tgtLang = convertLangName(destination[0] || 'chinese');
+
+    // Convert to ISO 639-1 codes for model lookup
+    const fullLangMap = {
+        'chinese': 'zh',
+        'japanese': 'jp',
+        'korean': 'ko',
+        'french': 'fr',
+        'german': 'de',
+        'spanish': 'es',
+        'russian': 'ru',
+        'portuguese': 'pt',
+        'zh_Hant': 'zh',
+    };
+
+    const srcIso = fullLangMap[srcLang] || (srcLang.length === 2 ? srcLang : 'en');
+    const tgtIso = fullLangMap[tgtLang] || (tgtLang.length === 2 ? tgtLang : 'zh');
+
+    const key = `${srcIso}-${tgtIso}`;
 
     // Handle same language case
-    if (srcLang === tgtLang) {
+    if (srcIso === tgtIso) {
         return res.json({ text, from: srcName, to: destination[0], result: [text] });
     }
 
-    const key = `${srcLang}-${tgtLang}`;
     const model = loadedModels.get(key);
 
     if (!model) return res.status(400).json({ error: `Model not loaded: ${key}` });
