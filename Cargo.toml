@@ -2,6 +2,7 @@
 name = "linguaspark-server"
 version = "0.1.0"
 edition = "2024"
+default-run = "linguaspark-server"
 
 [dependencies]
 anyhow = "1"
@@ -15,8 +16,12 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 whichlang = "0.1"
+rquickjs = { version = "0.6", features = ["full", "futures", "parallel"] }
+wasmtime = "29.0"
 
-linguaspark = { git = "https://github.com/LinguaSpark/core.git", branch = "main" }
+# WASM-compatible Bergamot translator for cross-platform support
+# Using local WASM files (bergamot-translator.wasm) instead of native C++ bindings
+# bergamot-translator = "0.6"
 
 [profile.release]
 strip = true

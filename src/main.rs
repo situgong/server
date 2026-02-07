@@ -8,7 +8,7 @@ use axum::{
     routing::{get, post},
 };
 use isolang::Language;
-use linguaspark::Translator;
+use crate::translation::Translator;
 use std::{fs, io, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::{net::TcpListener, signal};
 use tower_http::{
@@ -17,10 +17,11 @@ use tower_http::{
     },
     trace::TraceLayer,
 };
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 mod endpoint;
 mod translation;
+mod wasm_engine;
 
 const ENV_MODELS_PATH: &str = "MODELS_DIR";
 const ENV_NUM_WORKERS: &str = "NUM_WORKERS";
@@ -40,9 +41,6 @@ enum AppError {
     #[error("Unauthorized")]
     Unauthorized,
 
-    #[error("Translator error: {0}")]
-    TranslatorError(#[from] linguaspark::TranslatorError),
-
     #[error("Configuration error: {0}")]
     ConfigError(String),
 }
@@ -56,11 +54,16 @@ impl IntoResponse for AppError {
                 StatusCode::UNAUTHORIZED,
                 "Invalid or missing API key".to_string(),
             ),
-            AppError::TranslatorError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             AppError::ConfigError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
         };
 
         (status, Json(serde_json::json!({ "error": message }))).into_response()
+    }
+}
+
+impl From<anyhow::Error> for AppError {
+    fn from(err: anyhow::Error) -> Self {
+        AppError::TranslationError(err.to_string())
     }
 }
 
@@ -101,7 +104,7 @@ async fn auth_middleware(
     Ok(next.run(request).await)
 }
 
-fn load_models_manually(
+async fn load_models_manually(
     translator: &Translator,
     models_dir: &PathBuf,
 ) -> Result<Vec<(Language, Language)>, AppError> {
@@ -113,7 +116,7 @@ fn load_models_manually(
         let language_pair = entry.file_name().to_string_lossy().into_owned();
 
         info!("Looking for models in {}", model_dir_path.display());
-        translator.load_model(&language_pair, model_dir_path)?;
+        translator.load_model(&language_pair, &model_dir_path).await?;
 
         if language_pair.len() >= 4 {
             let from_lang = translation::parse_language_code(&language_pair[0..2])?;
@@ -199,10 +202,11 @@ async fn main() -> anyhow::Result<()> {
     let server_address = format!("{}:{}", server_ip, server_port);
 
     info!("Initializing translator with {} workers", num_workers);
-    let translator = Translator::new(num_workers).context("Failed to initialize translator")?;
+    let translator = Translator::new(num_workers).await.context("Failed to initialize translator")?;
 
     info!("Loading translation models from {}", models_dir.display());
     let models = load_models_manually(&translator, &models_dir)
+        .await
         .context("Failed to load translation models")?;
 
     let app_state = Arc::new(AppState { translator, models });
