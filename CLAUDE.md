@@ -4,60 +4,62 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-LinguaSpark Server is a Node.js HTTP translation service using the Bergamot Translator engine (same as Firefox Translations). Single-process architecture with no Rust dependencies.
+LinguaSpark Server is a Node.js HTTP translation service using the Bergamot Translator WASM engine (same as Firefox Translations). Single-process architecture running on Node.js >= 18.
 
 ## Quick Start
 
 ```bash
-# Install dependencies
 npm install
-
-# Start server
-npm start
-
-# Server runs on http://127.0.0.1:3000
+npm start  # Server runs on http://127.0.0.1:3000
+npm run dev  # Hot reload
 ```
 
-## Development
+## Commands
 
-```bash
-# Run with hot reload
-npm run dev
-```
+| Command | Description |
+|---------|-------------|
+| `npm start` | Start server |
+| `npm run dev` | Run with hot reload |
 
 ## Architecture
 
 ```
-server.js          - Main Express server with all endpoints
+server.js          - Main Express server (all endpoints, WASM loading, model management)
 wasm/              - Bergamot WASM files
-  bergamot-translator.wasm  - WASM binary
-  bergamot-translator.js   - Emscripten glue code
-models/            - Translation model files
+  bergamot-translator.wasm  - WASM binary (compiled C++)
+  bergamot-translator.js    - Emscripten glue code with embind bindings
+models/            - Translation model directories
 ```
 
-## Model Files
+### Key Implementation Details
 
-Model directories use 4-letter codes: `enzh/` (English→Chinese), `zhen/` (Chinese→English)
+**WASM Loading**: The Bergamot WASM module is loaded into a VM sandbox at server startup (`server.js:36-60`). This is required because Emscripten's embind generates browser-specific code.
 
-Expected files:
-- `model.intgemm8.bin` or `model.bin`
-- `model.s2t.bin` (lexicon)
-- `srcvocab.spm` (source vocabulary)
-- `trgvocab.spm` (target vocabulary)
+**Model Management**:
+- Models are stored in `models/{langPair}/` directories (e.g., `enzh/`, `zhen/`)
+- Auto-loaded on startup from directories in `MODELS_DIR`
+- Can also be loaded dynamically via `POST /models/load`
+- Models are cached in memory (`loadedModels` Map)
+
+**Language Detection**: Uses `franc` library with CJK character fallback heuristics (`server.js:158-183`)
+
+**Language Name Mapping**: Supports both ISO 639-1 codes and human-readable names:
+- `中文(简体)` → `zh`, `中文(繁体)` → `zh_Hant`
+- English names like `chinese`, `japanese`, etc.
 
 ## API Endpoints
 
-| Endpoint | Description |
-|----------|-------------|
-| `POST /translate` | Native translation API |
-| `POST /kiss` | Kiss Translator compatibility |
-| `POST /imme` | Immersive Translate (batch) |
-| `POST /hcfy` | HCFY compatibility |
-| `POST /deeplx` | DeepLX compatibility |
-| `POST /detect` | Language detection |
-| `GET /health` | Health check |
-| `GET /models` | List loaded models |
-| `POST /models/load` | Load a model |
+| Endpoint | Request | Response |
+|----------|---------|----------|
+| `POST /translate` | `{text, from?, to}` | `{text, from, to}` |
+| `POST /kiss` | `{text, from?, to}` | `{text, from, to}` |
+| `POST /imme` | `{source_lang?, target_lang, text_list[]}` | `{translations[]}` |
+| `POST /hcfy` | `{text, source?, destination[]}` | `{text, from, to, result[]}` |
+| `POST /deeplx` | `{text, source_lang, target_lang}` | `{code: 200, data, ...}` |
+| `POST /detect` | `{text}` | `{language}` |
+| `GET /health` | - | `{status, bergamotLoaded, loadedModels}` |
+| `GET /models` | - | `{models[]}` |
+| `POST /models/load` | `{from, to, modelDir?}` | `{success, key, from, to}` |
 
 ## Environment Variables
 
@@ -66,19 +68,20 @@ Expected files:
 | `PORT` | `3000` | Server port |
 | `IP` | `127.0.0.1` | Bind address |
 | `MODELS_DIR` | `./models` | Models directory |
-| `API_KEY` | `""` | API key (empty = no auth) |
-| `WASM_PATH` | `wasm/bergamot-translator.wasm` | WASM path |
-| `JS_PATH` | `wasm/bergamot-translator.js` | JS glue path |
+| `API_KEY` | `""` | API key authentication (empty = disabled) |
+| `WASM_PATH` | `wasm/bergamot-translator.wasm` | WASM binary path |
+| `JS_PATH` | `wasm/bergamot-translator.js` | JS glue code path |
 
-## API Key
+## Authentication
 
-Set `API_KEY` environment variable. Use header `Authorization: Bearer <key>` or query `?token=<key>`.
+When `API_KEY` is set, use header `Authorization: Bearer <key>` or query `?token=<key>`.
 
-## Why Bergamot WASM?
+## Model Files
 
-The Bergamot WASM uses Emscripten's embind system requiring complex C++ runtime support. Node.js provides:
-- Native WASI support
-- Full embind compatibility
-- Simple integration
+Model directory naming: `{fromLang}{toLang}` (e.g., `enzh`, `zhen`, `enja`)
 
-This is the same approach used by MTranServer.
+Expected files:
+- `model.intgemm8.bin` or `model.bin` - Translation model
+- `model.s2t.bin` or `model.lex.bin` - Shortlist lexicon
+- `srcvocab.spm` or `vocab.spm` - Source vocabulary
+- `trgvocab.spm` or `vocab.spm` - Target vocabulary
