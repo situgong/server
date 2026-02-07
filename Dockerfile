@@ -14,8 +14,8 @@ COPY server.js ./
 COPY wasm/ ./wasm/
 COPY public/ ./public/
 
-# Create models directory
-RUN mkdir -p /app/models
+# Copy translation models
+COPY models/ ./models/
 
 # Environment variables
 ENV NODE_ENV=production
