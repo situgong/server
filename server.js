@@ -20,6 +20,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import vm from 'vm';
 import { franc } from 'franc';
+import swaggerUi from 'swagger-ui-express';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -92,6 +93,33 @@ async function createBergamotInstance() {
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Load OpenAPI spec for Swagger UI
+let openapiSpec;
+try {
+    openapiSpec = JSON.parse(await fs.readFile(path.join(__dirname, 'public', 'openapi.json'), 'utf-8'));
+} catch (err) {
+    console.warn('[Server] Could not load OpenAPI spec:', err.message);
+    openapiSpec = {
+        openapi: '3.0.0',
+        info: { title: 'LinguaSpark API', version: '0.1.0' },
+        paths: {}
+    };
+}
+
+// Serve static files for Web UI
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Swagger UI at /docs/
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapiSpec, {
+    customCss: '.swagger-ui .topbar { display: none }',
+    customSiteTitle: 'LinguaSpark API Docs',
+}));
+
+// API endpoint to get OpenAPI spec
+app.get('/openapi.json', (req, res) => {
+    res.json(openapiSpec);
+});
 
 // State
 let activeModel = null; // Currently loaded model (only one at a time due to WASM limitation)
@@ -521,12 +549,17 @@ function checkAuth(req, res, next) {
 
 // ============== Endpoints ==============
 
-// Health check
+// Health check - returns available models with language info for UI
 app.get('/health', (req, res) => {
+    const models = Array.from(availableModels.entries()).map(([k, v]) => ({
+        key: k,
+        from: v.from,
+        to: v.to,
+    }));
     res.json({
         status: 'ok',
         bergamotLoaded: activeModel !== null,
-        availableModels: Array.from(availableModels.keys()),
+        availableModels: models,
     });
 });
 
@@ -708,8 +741,8 @@ app.post('/translate_mtranserver/batch', async (req, res) => {
 
 // ============== Model Management ==============
 
-// Get list of available models
-app.get('/models', checkAuth, (req, res) => {
+// Get list of available models (public - no auth required for UI)
+app.get('/models', (req, res) => {
     const models = Array.from(availableModels.entries()).map(([k, v]) => ({
         key: k,
         from: v.from,
