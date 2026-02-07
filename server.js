@@ -68,6 +68,7 @@ app.use(express.json());
 // State
 let bergamotModule = null;
 const loadedModels = new Map(); // key: "from-to", value: { instance, service, from, to }
+const loadingModels = new Set(); // Tracks models currently being loaded
 const langCodeMap = {
     // Chinese names
     '中文(简体)': 'zh',
@@ -276,6 +277,69 @@ function convertLangName(name) {
     return langCodeMap[name] || name;
 }
 
+// Auto-load model if not already loaded
+async function getOrLoadModel(from, to) {
+    const key = `${from}-${to}`;
+    let model = loadedModels.get(key);
+
+    if (!model) {
+        // Try to claim loading ownership atomically
+        if (loadingModels.has(key)) {
+            // Another request is loading, wait for it
+            while (loadingModels.has(key)) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            return loadedModels.get(key);
+        }
+
+        // Claim ownership and start loading
+        loadingModels.add(key);
+        try {
+            console.log(`[Server] Auto-loading model: ${key}`);
+
+            if (!bergamotModule) {
+                bergamotModule = await initBergamot();
+            }
+
+            const dir = path.join(CONFIG.MODELS_DIR, key);
+            const buffers = await loadModelFiles(dir);
+            const aligned = {};
+            const alignments = { model: 256, lex: 64, srcvocab: 64, trgvocab: 64 };
+            for (const [k, buf] of Object.entries(buffers)) {
+                aligned[k] = createAlignedMemory(buf, alignments[k]);
+            }
+
+            const vocabList = new bergamotModule.AlignedMemoryList();
+            vocabList.push_back(aligned.srcvocab);
+            vocabList.push_back(aligned.trgvocab);
+
+            const config = [
+                'beam-size: 1', 'normalize: 1.0', 'word-penalty: 0',
+                'max-length-break: 512', 'mini-batch-words: 1024', 'workspace: 128',
+                'max-length-factor: 2.0', 'skip-cost: true', 'cpu-threads: 0',
+                'quiet: true', 'quiet-translation: true',
+                'gemm-precision: int8shiftAlphaAll', 'alignment: soft'
+            ].join('\n');
+
+            model = {
+                instance: new bergamotModule.TranslationModel(from, to, config, aligned.model, aligned.lex, vocabList, null),
+                service: new bergamotModule.BlockingService({ cacheSize: 0 }),
+                from,
+                to
+            };
+            loadedModels.set(key, model);
+            console.log(`[Server] Model loaded: ${key}`);
+        } catch (err) {
+            console.error(`[Server] Failed to load model ${key}: ${err.message}`);
+            throw err;
+        } finally {
+            loadingModels.delete(key);
+        }
+    }
+
+    return model;
+}
+
 // ============== Auth Middleware ==============
 
 function checkAuth(req, res, next) {
@@ -314,12 +378,9 @@ app.post('/translate', checkAuth, async (req, res) => {
     if (!text || !to) return res.status(400).json({ error: 'Missing text or to' });
 
     const fromLang = from && from !== 'auto' ? from : detectLanguage(text);
-    const key = `${fromLang}-${to}`;
-    const model = loadedModels.get(key);
-
-    if (!model) return res.status(400).json({ error: `Model not loaded: ${key}` });
 
     try {
+        const model = await getOrLoadModel(fromLang, to);
         const result = translate(model, text);
         res.json({ text: result, from: fromLang, to });
     } catch (err) {
@@ -333,12 +394,9 @@ app.post('/kiss', checkAuth, async (req, res) => {
     if (!text || !to) return res.status(400).json({ error: 'Missing text or to' });
 
     const fromLang = from && from !== 'auto' ? from : detectLanguage(text);
-    const key = `${fromLang}-${to}`;
-    const model = loadedModels.get(key);
-
-    if (!model) return res.status(400).json({ error: `Model not loaded: ${key}` });
 
     try {
+        const model = await getOrLoadModel(fromLang, to);
         const result = translate(model, text);
         res.json({ text: result, from: fromLang, to });
     } catch (err) {
@@ -352,17 +410,18 @@ app.post('/imme', checkAuth, async (req, res) => {
     if (!target_lang || !text_list) return res.status(400).json({ error: 'Missing target_lang or text_list' });
 
     const fromLang = source_lang && source_lang !== 'auto' ? source_lang : detectLanguage(text_list[0] || '');
-    const key = `${fromLang}-${target_lang}`;
-    const model = loadedModels.get(key);
 
-    if (!model) return res.status(400).json({ error: `Model not loaded: ${key}` });
+    try {
+        const model = await getOrLoadModel(fromLang, target_lang);
+        const translations = text_list.map(text => ({
+            detected_source_lang: fromLang,
+            text: translate(model, text),
+        }));
 
-    const translations = text_list.map(text => ({
-        detected_source_lang: fromLang,
-        text: translate(model, text),
-    }));
-
-    res.json({ translations });
+        res.json({ translations });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // HCFY API
@@ -390,18 +449,13 @@ app.post('/hcfy', checkAuth, async (req, res) => {
     const srcIso = fullLangMap[srcLang] || (srcLang.length === 2 ? srcLang : 'en');
     const tgtIso = fullLangMap[tgtLang] || (tgtLang.length === 2 ? tgtLang : 'zh');
 
-    const key = `${srcIso}-${tgtIso}`;
-
     // Handle same language case
     if (srcIso === tgtIso) {
         return res.json({ text, from: srcName, to: destination[0], result: [text] });
     }
 
-    const model = loadedModels.get(key);
-
-    if (!model) return res.status(400).json({ error: `Model not loaded: ${key}` });
-
     try {
+        const model = await getOrLoadModel(srcIso, tgtIso);
         const result = translate(model, text);
         res.json({ text, from: srcName, to: destination[0], result: [result] });
     } catch (err) {
@@ -418,12 +472,9 @@ app.post('/deeplx', checkAuth, async (req, res) => {
 
     const fromLang = source_lang.toLowerCase();
     const toLang = target_lang.toLowerCase();
-    const key = `${fromLang}-${toLang}`;
-    const model = loadedModels.get(key);
-
-    if (!model) return res.status(400).json({ error: `Model not loaded: ${key}` });
 
     try {
+        const model = await getOrLoadModel(fromLang, toLang);
         const result = translate(model, text);
         res.json({
             code: 200,
@@ -611,11 +662,12 @@ async function start() {
         app.listen(CONFIG.PORT, CONFIG.IP, () => {
             console.log(`[Server] LinguaSpark listening on http://${CONFIG.IP}:${CONFIG.PORT}`);
             console.log(`[Server] Models directory: ${CONFIG.MODELS_DIR}`);
+            console.log(`[Server] Models loaded on-demand (use POST /models/load to preload)`);
             if (CONFIG.API_KEY) console.log(`[Server] API key protection enabled`);
         });
 
-        // Load initial models
-        loadInitialModels();
+        // Don't load all models at startup - they will be loaded on-demand
+        // Use POST /models/load to preload specific models
 
     } catch (err) {
         console.error('[Server] Failed to start:', err);
