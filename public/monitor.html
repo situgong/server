@@ -410,70 +410,43 @@
             }
         }
 
-        function createLogRow(log) {
-            const row = document.createElement('tr');
-            row.className = 'log-row';
-            row.dataset.timestamp = log.timestamp;
-            row.innerHTML = `
-                <td class="timestamp">${formatTime(log.timestamp)}</td>
-                <td>
-                    <span class="lang-badge">${log.from}</span>
-                    <span class="lang-arrow">→</span>
-                    <span class="lang-badge">${log.to}</span>
-                </td>
-                <td class="text-cell">
-                    <div class="source-text">${escapeHtml(log.source)}</div>
-                </td>
-                <td class="text-cell">
-                    <div class="translated-text">${escapeHtml(log.translated)}</div>
-                </td>
-            `;
-            return row;
-        }
-
         function updateLogTable(logs) {
             const tbody = document.getElementById('logTableBody');
             const emptyState = document.getElementById('emptyState');
 
             if (!logs || logs.length === 0) {
-                if (displayedLogIds.size === 0) {
-                    tbody.innerHTML = '';
-                    emptyState.style.display = 'block';
-                }
+                tbody.innerHTML = '';
+                emptyState.style.display = 'block';
                 return;
             }
 
             emptyState.style.display = 'none';
 
-            // Create a copy and reverse so newest appears first
-            const logsCopy = [...logs].reverse();
+            // Take only the newest MAX_DISPLAYED entries
+            const recentLogs = logs.slice(-MAX_DISPLAYED);
 
-            for (let i = 0; i < logsCopy.length; i++) {
-                const log = logsCopy[i];
-                const logId = log.timestamp;
+            // Reverse to show newest first
+            const logsCopy = [...recentLogs].reverse();
 
-                // Skip if already displayed
-                if (displayedLogIds.has(logId)) continue;
+            // Build HTML
+            const html = logsCopy.map(log => `
+                <tr class="log-row">
+                    <td class="timestamp">${formatTime(log.timestamp)}</td>
+                    <td>
+                        <span class="lang-badge">${log.from}</span>
+                        <span class="lang-arrow">→</span>
+                        <span class="lang-badge">${log.to}</span>
+                    </td>
+                    <td class="text-cell">
+                        <div class="source-text">${escapeHtml(log.source)}</div>
+                    </td>
+                    <td class="text-cell">
+                        <div class="translated-text">${escapeHtml(log.translated)}</div>
+                    </td>
+                </tr>
+            `).join('');
 
-                // Add new entry at the bottom
-                const row = createLogRow(log);
-                tbody.appendChild(row);
-                displayedLogIds.add(logId);
-
-                // Highlight animation
-                row.style.animation = 'none';
-                row.offsetHeight; // Trigger reflow
-                row.style.animation = 'highlight 1s ease';
-            }
-
-            // Remove old entries from bottom if exceeding max
-            while (tbody.children.length > MAX_DISPLAYED) {
-                const oldRow = tbody.lastElementChild;
-                if (oldRow) {
-                    displayedLogIds.delete(parseInt(oldRow.dataset.timestamp));
-                    oldRow.remove();
-                }
-            }
+            tbody.innerHTML = html;
         }
 
         function escapeHtml(text) {
@@ -493,7 +466,6 @@
         async function clearLogs() {
             try {
                 await fetch(`${API_BASE}/monitor/clear`, { method: 'POST' });
-                displayedLogIds.clear();
                 connectionErrors = 0;
                 document.getElementById('logTableBody').innerHTML = '';
                 document.getElementById('emptyState').style.display = 'block';
@@ -507,13 +479,8 @@
         fetchStats();
         fetchLogs();
 
-        // Auto refresh - use single interval for reliability
-        setInterval(async () => {
-            await fetchLogs();
-            if (connectionErrors === 0) {
-                await fetchStats();
-            }
-        }, 2000);
+        // Auto refresh
+        setInterval(fetchLogs, 2000);
     </script>
 </body>
 </html>

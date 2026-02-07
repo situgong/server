@@ -654,6 +654,26 @@ app.post('/monitor/clear', (req, res) => {
     res.json({ success: true });
 });
 
+// Get system stats (CPU, memory)
+app.get('/monitor/system', (req, res) => {
+    const memUsage = process.memoryUsage();
+    const os = require('os');
+    res.json({
+        memory: {
+            heapUsed: memUsage.heapUsed,
+            heapTotal: memUsage.heapTotal,
+            rss: memUsage.rss,
+            external: memUsage.external,
+            unit: 'bytes',
+        },
+        cpu: {
+            loadAvg: os.loadavg(),
+            unit: '1/5/15 min load average',
+        },
+        processUptime: process.uptime(),
+    });
+});
+
 // Language detection
 app.post('/detect', checkAuth, (req, res) => {
     const { text } = req.body;
