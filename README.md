@@ -86,7 +86,7 @@ mkdir -p models
 
 # Pull and start container
 docker run -d --name translation-service \
-  -p 3000:3000 \
+  -p 13000:3000 \
   -v "$(pwd)/models:/app/models" \
   ghcr.io/linguaspark/server:main
 ```
@@ -100,7 +100,7 @@ services:
   translation-service:
     image: ghcr.io/linguaspark/server:main
     ports:
-      - "3000:3000"
+      - "13000:3000"
     volumes:
       - ./models:/app/models
     environment:
