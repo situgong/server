@@ -15,6 +15,7 @@
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import vm from 'vm';
@@ -100,33 +101,105 @@ function normalizePath(p) {
     return path.normalize(p);
 }
 
+// ============== Model Loading ==============
+
+// Supported file naming patterns for model files
+const FILE_PATTERNS = {
+    model: [
+        { pattern: /model\.intgemm8\.bin$/i, key: 'model' },
+        { pattern: /model\.intgemm\.alphas\.bin$/i, key: 'model' },
+        { pattern: /^model\..*\.bin$/i, key: 'model' },
+        { pattern: /^model\.bin$/i, key: 'model' },
+    ],
+    lex: [
+        { pattern: /\.s2t\.bin$/i, key: 'lex' },
+        { pattern: /^lex\.50\.50\..*\.s2t\.bin$/i, key: 'lex' },
+        { pattern: /^lex\.bin$/i, key: 'lex' },
+        { pattern: /^lex\..*\.s2t\.bin$/i, key: 'lex' },
+    ],
+    srcvocab: [
+        { pattern: /^srcvocab\..*\.spm$/i, key: 'srcvocab' },
+        { pattern: /^vocab\..*\.spm$/i, key: 'srcvocab' },
+        { pattern: /^srcvocab\.spm$/i, key: 'srcvocab' },
+    ],
+    trgvocab: [
+        { pattern: /^trgvocab\..*\.spm$/i, key: 'trgvocab' },
+        { pattern: /^vocab\..*\.spm$/i, key: 'trgvocab' },
+        { pattern: /^trgvocab\.spm$/i, key: 'trgvocab' },
+    ],
+};
+
+function matchFile(name, patterns) {
+    for (const { pattern, key } of patterns) {
+        if (pattern.test(name)) return key;
+    }
+    return null;
+}
+
 async function loadModelFiles(modelPath) {
     const files = {};
-    const entries = await fs.readdir(modelPath, { withFileTypes: true });
+    const missing = { model: 'model.intgemm8.bin', lex: 'lex.s2t.bin', srcvocab: 'srcvocab.xxen.spm', trgvocab: 'trgvocab.xxen.spm' };
 
-    for (const entry of entries) {
-        const name = entry.name.toLowerCase();
-        if (name.endsWith('.spm')) {
-            // Handle both srcvocab/trgvocab and vocab naming patterns
-            if (name.startsWith('srcvocab') || (name === 'vocab.spm' && !files.srcvocab)) {
-                files.srcvocab = await fs.readFile(path.join(modelPath, entry.name));
-            } else if (name.startsWith('trgvocab') || (name.startsWith('vocab') && !files.trgvocab && name !== 'vocab.spm')) {
-                files.trgvocab = await fs.readFile(path.join(modelPath, entry.name));
-            } else if (name.includes('vocab') && !files.srcvocab && !files.trgvocab) {
-                // If neither is set yet, first vocab is src, second is trg
-                if (!files.srcvocab) files.srcvocab = await fs.readFile(path.join(modelPath, entry.name));
-                else files.trgvocab = await fs.readFile(path.join(modelPath, entry.name));
+    try {
+        const entries = await fs.readdir(modelPath, { withFileTypes: true });
+        for (const entry of entries) {
+            const name = entry.name;
+            const ext = path.extname(name).toLowerCase();
+
+            if (ext === '.spm') {
+                // Check vocab patterns
+                let key = matchFile(name, [...FILE_PATTERNS.srcvocab, ...FILE_PATTERNS.trgvocab]);
+                if (key) {
+                    if (!files[key]) files[key] = [];
+                    files[key].push({ name: entry.name, path: path.join(modelPath, entry.name) });
+                }
+            } else if (ext === '.bin') {
+                let key = matchFile(name, [...FILE_PATTERNS.model, ...FILE_PATTERNS.lex]);
+                if (key) {
+                    if (!files[key]) files[key] = [];
+                    files[key].push({ name: entry.name, path: path.join(modelPath, entry.name) });
+                }
             }
-        } else if (name.endsWith('.bin')) {
-            if (name.includes('s2t') || name.includes('lex')) files.lex = await fs.readFile(path.join(modelPath, entry.name));
-            else if (name.includes('model') || name.includes('intgemm')) files.model = await fs.readFile(path.join(modelPath, entry.name));
+        }
+    } catch (err) {
+        throw new Error(`Cannot read model directory: ${err.message}`);
+    }
+
+    // Validate required files exist
+    const required = ['model', 'lex', 'srcvocab', 'trgvocab'];
+    const found = Object.keys(files);
+
+    // Check for vocab.spm fallback
+    if (files['vocab.spm']) {
+        files.srcvocab = files.vocab.spm;
+        files.trgvocab = files.vocab.spm;
+        delete files['vocab.spm'];
+    }
+
+    // Check for single vocab file (use for both src and trg)
+    if ((files.srcvocab && !files.trgvocab) || (!files.srcvocab && files.trgvocab)) {
+        const vocabFile = files.srcvocab || files.trgvocab;
+        if (vocabFile && vocabFile.length > 0) {
+            files.srcvocab = vocabFile;
+            files.trgvocab = vocabFile;
         }
     }
 
-    if (!files.model || !files.lex || !files.srcvocab || !files.trgvocab) {
-        throw new Error(`Missing model files in ${modelPath}. Found: ${Object.keys(files).join(', ')}`);
+    const missingFiles = required.filter(k => !files[k] || files[k].length === 0);
+
+    if (missingFiles.length > 0) {
+        throw new Error(`Missing required files: ${missingFiles.map(f => missing[f]).join(', ')}`);
     }
-    return files;
+
+    // Read the first matching file for each type
+    const result = {};
+    for (const [key, arr] of Object.entries(files)) {
+        if (arr && arr.length > 0) {
+            result[key] = await fs.readFile(arr[0].path);
+        }
+    }
+
+    return result;
 }
 
 function createAlignedMemory(buffer, alignment = 64) {
@@ -458,31 +531,70 @@ async function initBergamot() {
 async function loadInitialModels() {
     try {
         const entries = await fs.readdir(CONFIG.MODELS_DIR, { withFileTypes: true });
+        let loaded = 0;
+        let failed = 0;
+
         for (const entry of entries) {
-            if (entry.isDirectory() && entry.name.length >= 4) {
-                // Handle both "enzh", "en-zh", "enja", "en-ja" naming conventions
+            if (entry.isDirectory()) {
+                // Parse directory name (supports "enzh", "en-zh", "enja", "en-ja")
                 let from, to;
-                if (entry.name.includes('-')) {
-                    [from, to] = entry.name.split('-');
+                const name = entry.name;
+
+                if (name.includes('-')) {
+                    [from, to] = name.split('-');
+                } else if (name.length >= 4) {
+                    from = name.slice(0, 2);
+                    to = name.slice(2, 4);
                 } else {
-                    from = entry.name.slice(0, 2);
-                    to = entry.name.slice(2, 4);
+                    continue; // Skip invalid directory names
                 }
+
                 const dir = path.join(CONFIG.MODELS_DIR, entry.name);
+
                 try {
-                    await loadModelFiles(dir);
-                    // Auto-load the model
-                    const { default: fetch } = await import('node-fetch');
-                    await fetch(`http://127.0.0.1:${CONFIG.PORT}/models/load`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ from, to, modelDir: dir })
-                    });
+                    const dir = path.join(CONFIG.MODELS_DIR, entry.name);
+                    const key = `${from}-${to}`;
+
+                    if (loadedModels.has(key)) {
+                        console.log(`[Server] Model ${key} already loaded`);
+                        continue;
+                    }
+
+                    // Load model files (also validates they exist)
+                    const buffers = await loadModelFiles(dir);
+                    const aligned = {};
+                    const alignments = { model: 256, lex: 64, srcvocab: 64, trgvocab: 64 };
+                    for (const [k, buf] of Object.entries(buffers)) {
+                        aligned[k] = createAlignedMemory(buf, alignments[k]);
+                    }
+
+                    const vocabList = new bergamotModule.AlignedMemoryList();
+                    vocabList.push_back(aligned.srcvocab);
+                    vocabList.push_back(aligned.trgvocab);
+
+                    const config = [
+                        'beam-size: 1', 'normalize: 1.0', 'word-penalty: 0',
+                        'max-length-break: 512', 'mini-batch-words: 1024', 'workspace: 128',
+                        'max-length-factor: 2.0', 'skip-cost: true', 'cpu-threads: 0',
+                        'quiet: true', 'quiet-translation: true',
+                        'gemm-precision: int8shiftAlphaAll', 'alignment: soft'
+                    ].join('\n');
+
+                    const model = new bergamotModule.TranslationModel(from, to, config, aligned.model, aligned.lex, vocabList, null);
+                    const service = new bergamotModule.BlockingService({ cacheSize: 0 });
+
+                    loadedModels.set(key, { instance: model, service, from, to });
+                    console.log(`[Server] Loaded model: ${key}`);
+                    loaded++;
+
                 } catch (err) {
-                    console.log(`[Server] Skipping model ${entry.name}: ${err.message}`);
+                    console.log(`[Server] Skipping ${entry.name}: ${err.message}`);
+                    failed++;
                 }
             }
         }
+
+        console.log(`[Server] Initial models: ${loaded} loaded, ${failed} skipped`);
     } catch (err) {
         console.log(`[Server] No initial models to load: ${err.message}`);
     }

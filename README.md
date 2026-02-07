@@ -122,10 +122,10 @@ models/
 ### Directory Naming Convention
 
 Model directories use `[source][target]` format with [ISO 639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes):
-- `enzh` - English to Chinese
-- `zhen` - Chinese to English
-- `enja` - English to Japanese
-- `jaen` - Japanese to English
+- `en-zh` - English to Chinese
+- `zh-en` - Chinese to English
+- `en-ja` - English to Japanese
+- `ja-en` - Japanese to English
 
 The service auto-loads all model directories on startup.
 

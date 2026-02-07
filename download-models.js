@@ -9,6 +9,7 @@
  *   node download-models.js --list             # List available models
  *   node download-models.js --dir ./models     # Specify output directory
  *   node download-models.js --check            # Check for updates
+ *   node download-models.js --all              # Download all available models
  */
 
 import fs from 'fs/promises';
@@ -31,30 +32,57 @@ const modelArg = args.find(a => a.startsWith('--model='))?.split('=')[1];
 const dirArg = args.find(a => a.startsWith('--dir='))?.split('=')[1];
 const listMode = args.includes('--list');
 const checkMode = args.includes('--check');
+const allMode = args.includes('--all');
 const helpMode = args.includes('--help') || args.includes('-h');
 
 const targetDir = dirArg || OUTPUT_DIR;
 const targetModel = modelArg;
 
-// Download using curl
-async function downloadFile(url, destPath) {
+// Supported language pairs
+const DEFAULT_MODELS = ['en-zh', 'en-ja', 'zh-en', 'en-ko', 'ja-en', 'ko-en', 'en-de', 'de-en', 'en-fr', 'fr-en', 'en-es', 'es-en', 'en-ru', 'ru-en', 'en-pt', 'pt-en'];
+
+// Download with retry and progress
+async function downloadFile(url, destPath, retries = 3) {
     await fs.mkdir(path.dirname(destPath), { recursive: true });
 
-    return new Promise((resolve, reject) => {
-        const proc = spawn('curl', ['-fsSL', '-C', '-', '-o', destPath, url], {
-            stdio: 'ignore'
-        });
+    const fileName = path.basename(destPath);
+    let attempt = 0;
 
-        proc.on('close', (code) => {
-            if (code === 0) {
-                console.log(`  Downloaded: ${path.basename(destPath)}`);
-                resolve();
+    while (attempt < retries) {
+        try {
+            // Get file size for progress
+            let downloadedSize = 0;
+            let fileSize = 0;
+
+            return new Promise((resolve, reject) => {
+                const proc = spawn('curl', ['-fsSL', '-C', '-', '-o', destPath, url], {
+                    stdio: 'ignore'
+                });
+
+                proc.stdout?.on('data', (data) => {
+                    process.stdout.write(`\r  ${fileName}: ${data.toString().trim()}`);
+                });
+
+                proc.on('close', (code) => {
+                    if (code === 0) {
+                        console.log(`\r  ${fileName}: Done`);
+                        resolve();
+                    } else {
+                        reject(new Error(`curl failed (exit ${code})`));
+                    }
+                });
+                proc.on('error', reject);
+            });
+        } catch (err) {
+            attempt++;
+            if (attempt < retries) {
+                console.log(`  Retry ${attempt}/${retries} for ${fileName}...`);
+                await new Promise(r => setTimeout(r, 1000 * attempt));
             } else {
-                reject(new Error(`curl failed (exit ${code})`));
+                throw err;
             }
-        });
-        proc.on('error', reject);
-    });
+        }
+    }
 }
 
 // Decompress gzip
@@ -188,40 +216,49 @@ async function downloadModel(modelKey, baseUrl, modelData) {
     const modelDir = path.join(targetDir, folderName);
     await fs.mkdir(modelDir, { recursive: true });
 
-    // Download lexical shortlist
+    // Download lexical shortlist with original filename
     if (files.lexicalShortlist) {
         const filePath = files.lexicalShortlist.path;
-        const tempPath = path.join(modelDir, 'lex.bin.gz');
+        const origName = path.basename(filePath).replace(/\.gz$/, '');
+        const destPath = path.join(modelDir, origName);
+        const tempPath = destPath + '.gz';
         await downloadFile(`${baseUrl}/${filePath}`, tempPath);
         await decompressFile(tempPath);
     }
 
-    // Download model
+    // Download model with original filename
     if (files.model) {
         const filePath = files.model.path;
-        const tempPath = path.join(modelDir, 'model.bin.gz');
+        const origName = path.basename(filePath).replace(/\.gz$/, '');
+        const destPath = path.join(modelDir, origName);
+        const tempPath = destPath + '.gz';
         await downloadFile(`${baseUrl}/${filePath}`, tempPath);
         await decompressFile(tempPath);
     }
 
-    // Download vocabularies
+    // Download vocabularies with original filenames
     if (files.srcVocab && files.trgVocab) {
-        const srcPath = path.join(modelDir, 'srcvocab.spm.gz');
-        await downloadFile(`${baseUrl}/${files.srcVocab.path}`, srcPath);
-        await decompressFile(srcPath);
+        const srcPath = files.srcVocab.path;
+        const trgPath = files.trgVocab.path;
+        const srcDest = path.join(modelDir, path.basename(srcPath).replace(/\.gz$/, ''));
+        const trgDest = path.join(modelDir, path.basename(trgPath).replace(/\.gz$/, ''));
 
-        const trgPath = path.join(modelDir, 'trgvocab.spm.gz');
-        await downloadFile(`${baseUrl}/${files.trgVocab.path}`, trgPath);
-        await decompressFile(trgPath);
+        await downloadFile(`${baseUrl}/${srcPath}`, srcDest + '.gz');
+        await decompressFile(srcDest + '.gz');
+
+        await downloadFile(`${baseUrl}/${trgPath}`, trgDest + '.gz');
+        await decompressFile(trgDest + '.gz');
     } else if (files.vocab) {
-        const vocabPath = path.join(modelDir, 'vocab.spm.gz');
-        await downloadFile(`${baseUrl}/${files.vocab.path}`, vocabPath);
-        await decompressFile(vocabPath);
+        const filePath = files.vocab.path;
+        const origName = path.basename(filePath).replace(/\.gz$/, '');
+        const destPath = path.join(modelDir, origName);
+        const tempPath = destPath + '.gz';
+        await downloadFile(`${baseUrl}/${filePath}`, tempPath);
+        await decompressFile(tempPath);
 
         // Copy vocab as both src and trg
-        const vocabFile = vocabPath.replace('.gz', '');
-        await fs.copyFile(vocabFile, path.join(modelDir, 'srcvocab.spm'));
-        await fs.copyFile(vocabFile, path.join(modelDir, 'trgvocab.spm'));
+        await fs.copyFile(destPath, path.join(modelDir, 'srcvocab.spm'));
+        await fs.copyFile(destPath, path.join(modelDir, 'trgvocab.spm'));
         console.log(`  Copied vocab as srcvocab.spm and trgvocab.spm`);
     }
 
@@ -271,12 +308,14 @@ Options:
   --list          List available models
   --check         Check for model updates
   --model=<name>  Download specific model (e.g., en-zh, en-ja, zh-en)
+  --all           Download all supported models
   --dir=<path>    Output directory (default: ./models)
   --rename        Rename old folders (enja -> en-ja, enzh -> en-zh)
   --help, -h      Show this help
 
 Examples:
-  node download-models.js                    # Download en-zh and en-ja
+  node download-models.js                    # Download default models
+  node download-models.js --all             # Download all models
   node download-models.js --model=en-zh       # Download only en-zh
   node download-models.js --list              # Show available models
   node download-models.js --check             # Check for updates
@@ -309,24 +348,37 @@ Environment:
     const baseUrl = data.baseUrl;
 
     // Determine models to download
-    const modelsToDownload = targetModel
-        ? [targetModel]
-        : ['en-zh', 'en-ja'];  // Default models
+    let modelsToDownload;
+    if (targetModel) {
+        modelsToDownload = [targetModel];
+    } else if (allMode) {
+        // Download all models from DEFAULT_MODELS that exist in registry
+        modelsToDownload = DEFAULT_MODELS.filter(m => data.models[m]);
+    } else {
+        // Default: download en-zh, en-ja
+        modelsToDownload = ['en-zh', 'en-ja'];
+    }
 
     console.log(`\nOutput directory: ${path.resolve(targetDir)}`);
     console.log(`Models: ${modelsToDownload.join(', ')}\n`);
 
+    let successCount = 0;
     for (const model of modelsToDownload) {
         try {
             await downloadModel(model, baseUrl, data.models);
+            successCount++;
         } catch (err) {
             console.error(`Failed to download ${model}: ${err.message}`);
-            process.exit(1);
         }
     }
 
     console.log('\n' + '='.repeat(60));
-    console.log('All models downloaded successfully!');
+    if (successCount > 0) {
+        console.log(`Downloaded ${successCount}/${modelsToDownload.length} models successfully!`);
+    } else {
+        console.log('No models were downloaded.');
+        process.exit(1);
+    }
     console.log(`\nTo use: Set MODELS_DIR=${path.resolve(targetDir)} or restart server`);
 }
 
