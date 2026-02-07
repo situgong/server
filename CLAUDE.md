@@ -4,109 +4,81 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-LinguaSpark Server is a Rust-based HTTP translation service using the Bergamot Translator engine (same as Firefox Translations). It uses a hybrid architecture with Rust for the HTTP server and Node.js for WASM translation.
+LinguaSpark Server is a Node.js HTTP translation service using the Bergamot Translator engine (same as Firefox Translations). Single-process architecture with no Rust dependencies.
+
+## Quick Start
+
+```bash
+# Install dependencies
+npm install
+
+# Start server
+npm start
+
+# Server runs on http://127.0.0.1:3000
+```
+
+## Development
+
+```bash
+# Run with hot reload
+npm run dev
+```
 
 ## Architecture
 
 ```
-Rust Server (Port 3000) <--HTTP--> Node.js Worker (Port 3001) <--WASM--> Bergamot
+server.js          - Main Express server with all endpoints
+wasm/              - Bergamot WASM files
+  bergamot-translator.wasm  - WASM binary
+  bergamot-translator.js   - Emscripten glue code
+models/            - Translation model files
 ```
-
-### Source Structure
-
-- `src/main.rs` - Axum web server, spawns Node.js worker
-- `src/endpoint.rs` - HTTP API handlers for all translation formats
-- `src/translation.rs` - Translation client (talks to Node.js worker)
-- `wasm-worker.js` - Node.js sidecar that loads and runs Bergamot WASM
-- `wasm/bergamot-translator.js` - Official Emscripten glue code
-- `wasm/bergamot-translator.wasm` - Compiled Bergamot translator
-
-## Development Commands
-
-```bash
-# Install Node dependencies for the worker
-npm install
-
-# Build Rust server
-cargo build --release
-
-# Run both Rust server and Node.js worker (from project root)
-cargo run --release
-
-# Run Node.js worker separately
-node wasm-worker.js
-```
-
-### Rust Commands
-
-```bash
-# Check compilation
-cargo check
-
-# Format code
-cargo fmt
-
-# Lint
-cargo clippy
-
-# Inspect WASM module
-cargo run --bin inspect
-```
-
-## Translation Flow
-
-1. Rust server starts and spawns `wasm-worker.js` as a child process
-2. Worker loads `bergamot-translator.wasm` + `bergamot-translator.js` via Node.js
-3. On `/translate` request, Rust forwards to `localhost:3001/translate`
-4. Node.js worker performs translation using Bergamot WASM
-5. Response returned to client
 
 ## Model Files
 
 Model directories use 4-letter codes: `enzh/` (English→Chinese), `zhen/` (Chinese→English)
 
 Expected files:
-- `model.intgemm8.bin` or `model.enzh.intgemm.alphas.bin`
-- `model.s2t.bin` or `lex.50.50.enzh.s2t.bin`
-- `srcvocab.spm`
-- `trgvocab.spm`
+- `model.intgemm8.bin` or `model.bin`
+- `model.s2t.bin` (lexicon)
+- `srcvocab.spm` (source vocabulary)
+- `trgvocab.spm` (target vocabulary)
 
 ## API Endpoints
 
-All endpoints on port 3000:
-
-- `POST /translate` - Native API
-- `POST /kiss` - Kiss Translator compatibility
-- `POST /imme` - Immersive Translate compatibility (batch)
-- `POST /hcfy` - HCFY compatibility (converts Chinese language names)
-- `POST /deeplx` - DeepLX compatibility
-- `POST /detect` - Language detection via Whichlang
-- `GET /health` - Health check
-
-Optional API key via `Authorization: Bearer <key>` or `?token=<key>`
+| Endpoint | Description |
+|----------|-------------|
+| `POST /translate` | Native translation API |
+| `POST /kiss` | Kiss Translator compatibility |
+| `POST /imme` | Immersive Translate (batch) |
+| `POST /hcfy` | HCFY compatibility |
+| `POST /deeplx` | DeepLX compatibility |
+| `POST /detect` | Language detection |
+| `GET /health` | Health check |
+| `GET /models` | List loaded models |
+| `POST /models/load` | Load a model |
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MODELS_DIR` | `./models` | Path to translation models |
-| `PORT` | `3000` | Rust server port |
-| `WORKER_PORT` | `3001` | Node.js worker port |
+| `PORT` | `3000` | Server port |
 | `IP` | `127.0.0.1` | Bind address |
+| `MODELS_DIR` | `./models` | Models directory |
 | `API_KEY` | `""` | API key (empty = no auth) |
-| `RUST_LOG` | `info` | Log level |
+| `WASM_PATH` | `wasm/bergamot-translator.wasm` | WASM path |
+| `JS_PATH` | `wasm/bergamot-translator.js` | JS glue path |
 
-## Why Node.js Sidecar?
+## API Key
 
-The Bergamot WASM uses Emscripten's embind system which requires complex C++ runtime support (50+ imports like `_embind_register_*`, `__cxa_*`, WASI). Using Node.js as the WASM runtime provides:
+Set `API_KEY` environment variable. Use header `Authorization: Bearer <key>` or query `?token=<key>`.
+
+## Why Bergamot WASM?
+
+The Bergamot WASM uses Emscripten's embind system requiring complex C++ runtime support. Node.js provides:
 - Native WASI support
 - Full embind compatibility
-- Simpler integration than reimplementing in Rust
-- Proven approach (used by MTranServer)
+- Simple integration
 
-## Language Detection
-
-- Uses Whichlang for automatic detection when `from` is omitted or `"auto"`
-- If only one model loaded, uses that model's source language
-- Returns original text if source == target
-- HCFY endpoint maps Chinese names to ISO codes
+This is the same approach used by MTranServer.
