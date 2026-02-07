@@ -34,31 +34,59 @@ const CONFIG = {
     JS_PATH: process.env.JS_PATH || path.join(__dirname, 'wasm', 'bergamot-translator.js'),
 };
 
-// Load bergamot-translator.js into VM sandbox
+// Load bergamot-translator.js and WASM binary (will create instances per model)
 const bergamotJsContent = await fs.readFile(CONFIG.JS_PATH, 'utf-8');
-const sandbox = {
-    console: console,
-    undefined: undefined,
-    Math: Math,
-    Object: Object,
-    String: String,
-    Array: Array,
-    Uint8Array: Uint8Array,
-    ArrayBuffer: ArrayBuffer,
-    TextDecoder: TextDecoder,
-    WebAssembly: WebAssembly,
-    Error: Error,
-    TypeError: TypeError,
-    Map: Map,
-    Set: Set,
-    Promise: Promise,
-    JSON: JSON,
-    Date: Date,
-    RegExp: RegExp,
-};
-vm.createContext(sandbox);
-vm.runInContext(bergamotJsContent, sandbox);
-const loadBergamot = sandbox.loadBergamot;
+let wasmBinary = null;
+
+// Create a new Bergamot WASM instance
+async function createBergamotInstance() {
+    const sandbox = {
+        console: console,
+        undefined: undefined,
+        Math: Math,
+        Object: Object,
+        String: String,
+        Array: Array,
+        Uint8Array: Uint8Array,
+        ArrayBuffer: ArrayBuffer,
+        TextDecoder: TextDecoder,
+        WebAssembly: WebAssembly,
+        Error: Error,
+        TypeError: TypeError,
+        Map: Map,
+        Set: Set,
+        Promise: Promise,
+        JSON: JSON,
+        Date: Date,
+        RegExp: RegExp,
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(bergamotJsContent, sandbox);
+
+    // Load WASM binary if not cached
+    if (!wasmBinary) {
+        const data = await fs.readFile(CONFIG.WASM_PATH);
+        wasmBinary = data.buffer;
+    }
+
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('WASM init timeout')), 30000);
+
+        sandbox.loadBergamot({
+            wasmBinary: wasmBinary,
+            print: (msg) => console.log(`[Bergamot]: ${msg}`),
+            printErr: (msg) => console.error(`[Bergamot Error]: ${msg}`),
+            onAbort: (msg) => {
+                console.error(`[Bergamot Abort]: ${msg}`);
+                reject(new Error(`WASM aborted: ${msg}`));
+            },
+            onRuntimeInitialized: function() {
+                clearTimeout(timeout);
+                resolve(this);
+            }
+        });
+    });
+}
 
 // Express app
 const app = express();
@@ -66,9 +94,9 @@ app.use(cors());
 app.use(express.json());
 
 // State
-let bergamotModule = null;
-const loadedModels = new Map(); // key: "from-to", value: { instance, service, from, to }
-const loadingModels = new Set(); // Tracks models currently being loaded
+let activeModel = null; // Currently loaded model (only one at a time due to WASM limitation)
+const availableModels = new Map(); // key: "from-to", value: { dir, from, to, buffers: null }
+const loadingLocks = new Map(); // key: "from-to", value: Promise (prevents duplicate loads)
 const langCodeMap = {
     // Chinese names
     '中文(简体)': 'zh',
@@ -100,6 +128,99 @@ const langCodeMap = {
 
 function normalizePath(p) {
     return path.normalize(p);
+}
+
+// MTranServer compatible language code normalization
+const languageAliases = {
+    'zh': 'zh',
+    'zh-cn': 'zh',
+    'zh-sg': 'zh',
+    'zh-hans': 'zh',
+    'cmn': 'zh',
+    'chinese': 'zh',
+    'zh-tw': 'zh-Hant',
+    'zh-hk': 'zh-Hant',
+    'zh-mo': 'zh-Hant',
+    'zh-hant': 'zh-Hant',
+    'cht': 'zh-Hant',
+    'en-us': 'en',
+    'en-gb': 'en',
+    'en-au': 'en',
+    'en-ca': 'en',
+    'en-nz': 'en',
+    'en-ie': 'en',
+    'en-za': 'en',
+    'en-jm': 'en',
+    'en-bz': 'en',
+    'en-tt': 'en',
+    'ja-jp': 'ja',
+    'jp': 'ja',
+    'ko-kr': 'ko',
+    'kr': 'ko',
+};
+
+function normalizeLanguageCode(code) {
+    if (!code) return '';
+
+    const normalized = code.toLowerCase().replace(/_/g, '-');
+
+    if (languageAliases[normalized]) {
+        return languageAliases[normalized];
+    }
+
+    const mainCode = normalized.split('-')[0];
+    if (languageAliases[mainCode]) {
+        return languageAliases[mainCode];
+    }
+
+    return mainCode;
+}
+
+// Map normalized language code to model directory key
+function langCodeToModelKey(code) {
+    // Map zh-Hans/zh-Hant variations to simple 'zh'
+    if (code === 'zh-Hans' || code === 'zh-Hant') {
+        return 'zh';
+    }
+    return code;
+}
+
+// Check if a language pair needs pivot translation via English
+function needsPivotTranslation(fromLang, toLang) {
+    // Use model directory keys (zh instead of zh-Hans)
+    const fromKey = langCodeToModelKey(fromLang);
+    const toKey = langCodeToModelKey(toLang);
+
+    if (fromKey === 'en' || toKey === 'en') {
+        return false;
+    }
+    const key = `${fromKey}-${toKey}`;
+    return !availableModels.has(key);
+}
+
+// Translate with pivot (via English if needed)
+async function translateWithPivot(fromLang, toLang, text, isHTML = false) {
+    // Same language - no translation needed
+    if (fromLang === toLang) {
+        return text;
+    }
+
+    // Use model directory keys
+    const fromKey = langCodeToModelKey(fromLang);
+    const toKey = langCodeToModelKey(toLang);
+
+    // Direct translation available
+    if (!needsPivotTranslation(fromLang, toLang)) {
+        const model = await getModel(fromKey, toKey);
+        return doTranslate(model, text);
+    }
+
+    // Pivot via English
+    const intermediateModel = await getModel(fromKey, 'en');
+    const intermediate = doTranslate(intermediateModel, text);
+
+    const finalModel = await getModel('en', toKey);
+    return doTranslate(finalModel, intermediate);
 }
 
 // ============== Model Loading ==============
@@ -204,17 +325,118 @@ async function loadModelFiles(modelPath) {
 }
 
 function createAlignedMemory(buffer, alignment = 64) {
-    const aligned = new bergamotModule.AlignedMemory(buffer.length || buffer.byteLength, alignment);
+    // Use the active model's bergamot module, or create a temporary one
+    const bergamot = activeModel ? activeModel.bergamot : null;
+    if (!bergamot) {
+        throw new Error('No active model available');
+    }
+    const aligned = new bergamot.AlignedMemory(buffer.length || buffer.byteLength, alignment);
     const view = aligned.getByteArrayView();
     view.set(new Uint8Array(buffer));
     return aligned;
 }
 
-function translate(model, text) {
-    const msgs = new bergamotModule.VectorString();
-    const opts = new bergamotModule.VectorResponseOptions();
+// Load model into WASM (unloads previous model if any)
+async function loadModel(key) {
+    const modelInfo = availableModels.get(key);
+    if (!modelInfo) {
+        throw new Error(`Model not available: ${key}`);
+    }
+
+    // If already active, return it
+    if (activeModel && activeModel.key === key) {
+        return activeModel;
+    }
+
+    // Check if another thread is already loading this model
+    if (loadingLocks.has(key)) {
+        console.log(`[Server] Waiting for model ${key} to finish loading...`);
+        return await loadingLocks.get(key);
+    }
+
+    // Create loading promise
+    const loadPromise = doLoadModel(key, modelInfo);
+    loadingLocks.set(key, loadPromise);
+
     try {
-        msgs.push_back(text);
+        const result = await loadPromise;
+        return result;
+    } finally {
+        loadingLocks.delete(key);
+    }
+}
+
+async function doLoadModel(key, modelInfo) {
+    // Unload previous model to free WASM memory
+    if (activeModel) {
+        console.log(`[Server] Unloading previous model: ${activeModel.key}`);
+        try {
+            activeModel.instance.delete();
+            activeModel.service.delete();
+            // Delete the WASM module to free memory
+            if (activeModel.bergamot) {
+                // bergamot cleanup is handled by deleting model/service
+            }
+        } catch (e) {
+            // Ignore cleanup errors
+        }
+        activeModel = null;
+    }
+
+    // Load model files if not cached
+    if (!modelInfo.buffers) {
+        console.log(`[Server] Loading model files: ${key}`);
+        modelInfo.buffers = await loadModelFiles(modelInfo.dir);
+    }
+
+    const { from, to, buffers } = modelInfo;
+    console.log(`[Server] Creating WASM instance for model: ${key}`);
+
+    // Create a new WASM instance per model (like MTranServer)
+    const bergamot = await createBergamotInstance();
+
+    const aligned = {};
+    const alignments = { model: 256, lex: 64, srcvocab: 64, trgvocab: 64 };
+    for (const [k, buf] of Object.entries(buffers)) {
+        aligned[k] = createAlignedMemoryFromModule(bergamot, buf, alignments[k]);
+    }
+
+    const vocabList = new bergamot.AlignedMemoryList();
+    vocabList.push_back(aligned.srcvocab);
+    vocabList.push_back(aligned.trgvocab);
+
+    const config = [
+        'beam-size: 1', 'normalize: 1.0', 'word-penalty: 0',
+        'max-length-break: 512', 'mini-batch-words: 1024', 'workspace: 128',
+        'max-length-factor: 2.0', 'skip-cost: true', 'cpu-threads: 0',
+        'quiet: true', 'quiet-translation: true',
+        'gemm-precision: int8shiftAlphaAll', 'alignment: soft'
+    ].join('\n');
+
+    const instance = new bergamot.TranslationModel(from, to, config, aligned.model, aligned.lex, vocabList, null);
+    const service = new bergamot.BlockingService({ cacheSize: 0 });
+
+    activeModel = { key, instance, service, from, to, aligned, vocabList, bergamot };
+    console.log(`[Server] Model activated: ${key}`);
+    return activeModel;
+}
+
+function createAlignedMemoryFromModule(bergamot, buffer, alignment = 64) {
+    const aligned = new bergamot.AlignedMemory(buffer.length || buffer.byteLength, alignment);
+    const view = aligned.getByteArrayView();
+    view.set(new Uint8Array(buffer));
+    return aligned;
+}
+
+function doTranslate(model, text) {
+    // Clean text - remove control characters and replacement chars
+    let cleanedText = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    cleanedText = cleanedText.replace(/\uFFFD/g, '');
+
+    const msgs = new model.bergamot.VectorString();
+    const opts = new model.bergamot.VectorResponseOptions();
+    try {
+        msgs.push_back(cleanedText);
         opts.push_back({ qualityScores: false, alignment: false, html: false });
         const responses = model.service.translate(model.instance, msgs, opts);
         const result = responses.get(0).getTranslatedText();
@@ -277,67 +499,10 @@ function convertLangName(name) {
     return langCodeMap[name] || name;
 }
 
-// Auto-load model if not already loaded
-async function getOrLoadModel(from, to) {
+// Get or load model for translation
+async function getModel(from, to) {
     const key = `${from}-${to}`;
-    let model = loadedModels.get(key);
-
-    if (!model) {
-        // Try to claim loading ownership atomically
-        if (loadingModels.has(key)) {
-            // Another request is loading, wait for it
-            while (loadingModels.has(key)) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-            return loadedModels.get(key);
-        }
-
-        // Claim ownership and start loading
-        loadingModels.add(key);
-        try {
-            console.log(`[Server] Auto-loading model: ${key}`);
-
-            if (!bergamotModule) {
-                bergamotModule = await initBergamot();
-            }
-
-            const dir = path.join(CONFIG.MODELS_DIR, key);
-            const buffers = await loadModelFiles(dir);
-            const aligned = {};
-            const alignments = { model: 256, lex: 64, srcvocab: 64, trgvocab: 64 };
-            for (const [k, buf] of Object.entries(buffers)) {
-                aligned[k] = createAlignedMemory(buf, alignments[k]);
-            }
-
-            const vocabList = new bergamotModule.AlignedMemoryList();
-            vocabList.push_back(aligned.srcvocab);
-            vocabList.push_back(aligned.trgvocab);
-
-            const config = [
-                'beam-size: 1', 'normalize: 1.0', 'word-penalty: 0',
-                'max-length-break: 512', 'mini-batch-words: 1024', 'workspace: 128',
-                'max-length-factor: 2.0', 'skip-cost: true', 'cpu-threads: 0',
-                'quiet: true', 'quiet-translation: true',
-                'gemm-precision: int8shiftAlphaAll', 'alignment: soft'
-            ].join('\n');
-
-            model = {
-                instance: new bergamotModule.TranslationModel(from, to, config, aligned.model, aligned.lex, vocabList, null),
-                service: new bergamotModule.BlockingService({ cacheSize: 0 }),
-                from,
-                to
-            };
-            loadedModels.set(key, model);
-            console.log(`[Server] Model loaded: ${key}`);
-        } catch (err) {
-            console.error(`[Server] Failed to load model ${key}: ${err.message}`);
-            throw err;
-        } finally {
-            loadingModels.delete(key);
-        }
-    }
-
-    return model;
+    return await loadModel(key);
 }
 
 // ============== Auth Middleware ==============
@@ -360,8 +525,8 @@ function checkAuth(req, res, next) {
 app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
-        bergamotLoaded: !!bergamotModule,
-        loadedModels: Array.from(loadedModels.keys()),
+        bergamotLoaded: activeModel !== null,
+        availableModels: Array.from(availableModels.keys()),
     });
 });
 
@@ -380,8 +545,8 @@ app.post('/translate', checkAuth, async (req, res) => {
     const fromLang = from && from !== 'auto' ? from : detectLanguage(text);
 
     try {
-        const model = await getOrLoadModel(fromLang, to);
-        const result = translate(model, text);
+        const model = await getModel(fromLang, to);
+        const result = doTranslate(model, text);
         res.json({ text: result, from: fromLang, to });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -396,8 +561,8 @@ app.post('/kiss', checkAuth, async (req, res) => {
     const fromLang = from && from !== 'auto' ? from : detectLanguage(text);
 
     try {
-        const model = await getOrLoadModel(fromLang, to);
-        const result = translate(model, text);
+        const model = await getModel(fromLang, to);
+        const result = doTranslate(model, text);
         res.json({ text: result, from: fromLang, to });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -412,11 +577,14 @@ app.post('/imme', checkAuth, async (req, res) => {
     const fromLang = source_lang && source_lang !== 'auto' ? source_lang : detectLanguage(text_list[0] || '');
 
     try {
-        const model = await getOrLoadModel(fromLang, target_lang);
-        const translations = text_list.map(text => ({
-            detected_source_lang: fromLang,
-            text: translate(model, text),
-        }));
+        const model = await getModel(fromLang, target_lang);
+        const translations = [];
+        for (const text of text_list) {
+            translations.push({
+                detected_source_lang: fromLang,
+                text: doTranslate(model, text),
+            });
+        }
 
         res.json({ translations });
     } catch (err) {
@@ -455,8 +623,8 @@ app.post('/hcfy', checkAuth, async (req, res) => {
     }
 
     try {
-        const model = await getOrLoadModel(srcIso, tgtIso);
-        const result = translate(model, text);
+        const model = await getModel(srcIso, tgtIso);
+        const result = doTranslate(model, text);
         res.json({ text, from: srcName, to: destination[0], result: [result] });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -474,8 +642,8 @@ app.post('/deeplx', checkAuth, async (req, res) => {
     const toLang = target_lang.toLowerCase();
 
     try {
-        const model = await getOrLoadModel(fromLang, toLang);
-        const result = translate(model, text);
+        const model = await getModel(fromLang, toLang);
+        const result = doTranslate(model, text);
         res.json({
             code: 200,
             id: Date.now(),
@@ -490,11 +658,59 @@ app.post('/deeplx', checkAuth, async (req, res) => {
     }
 });
 
+// MTranServer compatible API - Single translation
+// POST /translate_mtranserver
+// Input: { from: string, to: string, text: string, html?: boolean }
+// Output: { result: string }
+app.post('/translate_mtranserver', async (req, res) => {
+    const { from, to, text, html } = req.body;
+    if (!from || !to || !text) {
+        return res.status(400).json({ error: 'Missing required fields: from, to, text' });
+    }
+
+    try {
+        const normalizedFrom = normalizeLanguageCode(from);
+        const normalizedTo = normalizeLanguageCode(to);
+
+        const result = await translateWithPivot(normalizedFrom, normalizedTo, text, html || false);
+        res.json({ result });
+    } catch (err) {
+        console.error('[Server] MTranServer translate error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// MTranServer compatible API - Batch translation
+// POST /translate_mtranserver/batch
+// Input: { from: string, to: string, texts: string[], html?: boolean }
+// Output: { results: string[] }
+app.post('/translate_mtranserver/batch', async (req, res) => {
+    const { from, to, texts, html } = req.body;
+    if (!from || !to || !texts || !Array.isArray(texts)) {
+        return res.status(400).json({ error: 'Missing required fields: from, to, texts[]' });
+    }
+
+    try {
+        const normalizedFrom = normalizeLanguageCode(from);
+        const normalizedTo = normalizeLanguageCode(to);
+
+        const results = [];
+        for (const text of texts) {
+            const result = await translateWithPivot(normalizedFrom, normalizedTo, text, html || false);
+            results.push(result);
+        }
+        res.json({ results });
+    } catch (err) {
+        console.error('[Server] MTranServer batch translate error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ============== Model Management ==============
 
 // Get list of available models
 app.get('/models', checkAuth, (req, res) => {
-    const models = Array.from(loadedModels.entries()).map(([k, v]) => ({
+    const models = Array.from(availableModels.entries()).map(([k, v]) => ({
         key: k,
         from: v.from,
         to: v.to,
@@ -502,151 +718,97 @@ app.get('/models', checkAuth, (req, res) => {
     res.json({ models });
 });
 
-// Load a model
+// Register a model for on-demand loading
 app.post('/models/load', checkAuth, async (req, res) => {
     const { from, to, modelDir } = req.body;
     if (!from || !to) return res.status(400).json({ error: 'Missing from or to' });
 
     const key = `${from}-${to}`;
-    if (loadedModels.has(key)) {
-        return res.json({ success: true, key, from, to, alreadyLoaded: true });
+    if (availableModels.has(key)) {
+        return res.json({ success: true, key, from, to, alreadyRegistered: true });
     }
 
     const dir = normalizePath(modelDir || path.join(CONFIG.MODELS_DIR, key));
 
-    console.log(`[Server] Loading model: ${key} from ${dir}`);
+    console.log(`[Server] Registering model: ${key} from ${dir}`);
 
     try {
-        if (!bergamotModule) {
-            bergamotModule = await initBergamot();
-        }
-
+        // Validate model files exist
         const buffers = await loadModelFiles(dir);
-        const aligned = {};
-        const alignments = { model: 256, lex: 64, srcvocab: 64, trgvocab: 64 };
-        for (const [k, buf] of Object.entries(buffers)) {
-            aligned[k] = createAlignedMemory(buf, alignments[k]);
-        }
 
-        const vocabList = new bergamotModule.AlignedMemoryList();
-        vocabList.push_back(aligned.srcvocab);
-        vocabList.push_back(aligned.trgvocab);
+        // Register for on-demand loading
+        availableModels.set(key, { dir, from, to, buffers });
+        console.log(`[Server] Model registered: ${key}`);
 
-        const config = [
-            'beam-size: 1', 'normalize: 1.0', 'word-penalty: 0',
-            'max-length-break: 512', 'mini-batch-words: 1024', 'workspace: 128',
-            'max-length-factor: 2.0', 'skip-cost: true', 'cpu-threads: 0',
-            'quiet: true', 'quiet-translation: true',
-            'gemm-precision: int8shiftAlphaAll', 'alignment: soft'
-        ].join('\n');
-
-        const model = new bergamotModule.TranslationModel(from, to, config, aligned.model, aligned.lex, vocabList, null);
-        const service = new bergamotModule.BlockingService({ cacheSize: 0 });
-
-        loadedModels.set(key, { instance: model, service, from, to });
-        console.log(`[Server] Model loaded: ${key}`);
-
-        res.json({ success: true, key, from, to });
+        res.json({ success: true, key, from, to, message: 'Model registered for on-demand loading' });
     } catch (err) {
-        console.error(`[Server] Failed to load model ${key}:`, err);
+        console.error(`[Server] Failed to register model ${key}:`, err);
         res.status(500).json({ error: err.message });
     }
 });
 
 // ============== Initialization ==============
 
-async function initBergamot() {
-    console.log(`[Server] Loading WASM from: ${CONFIG.WASM_PATH}`);
-    const wasmBinary = await fs.readFile(CONFIG.WASM_PATH);
+async function scanModelDirectories() {
+    try {
+        const entries = await fs.readdir(CONFIG.MODELS_DIR, { withFileTypes: true });
+        let discovered = 0;
 
-    return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('WASM init timeout')), 60000);
+        for (const entry of entries) {
+            if (entry.isDirectory()) {
+                // Parse directory name (supports "enzh", "en-zh", "enja", "en-ja")
+                let from, to;
+                const name = entry.name;
 
-        loadBergamot({
-            wasmBinary: wasmBinary.buffer,
-            print: (msg) => console.log(`[Bergamot]: ${msg}`),
-            printErr: (msg) => console.error(`[Bergamot Error]: ${msg}`),
-            onAbort: (msg) => {
-                console.error(`[Bergamot Abort]: ${msg}`);
-                reject(new Error(`WASM aborted: ${msg}`));
-            },
-            onRuntimeInitialized: function() {
-                console.log('[Server] Bergamot runtime initialized');
-                clearTimeout(timeout);
-                resolve(this);
+                if (name.includes('-')) {
+                    [from, to] = name.split('-');
+                } else if (name.length >= 4) {
+                    from = name.slice(0, 2);
+                    to = name.slice(2, 4);
+                } else {
+                    continue; // Skip invalid directory names
+                }
+
+                const dir = path.join(CONFIG.MODELS_DIR, entry.name);
+                const key = `${from}-${to}`;
+
+                // Just register the model directory, don't load yet
+                if (!availableModels.has(key)) {
+                    availableModels.set(key, { dir, from, to, buffers: null });
+                    discovered++;
+                }
             }
-        });
-    });
+        }
+
+        console.log(`[Server] Discovered ${discovered} models: ${Array.from(availableModels.keys()).join(', ')}`);
+    } catch (err) {
+        console.log(`[Server] No models directory found or error scanning: ${err.message}`);
+    }
 }
 
-async function loadInitialModels() {
-    const entries = await fs.readdir(CONFIG.MODELS_DIR, { withFileTypes: true });
-    let loaded = 0;
-
-    for (const entry of entries) {
-        if (entry.isDirectory()) {
-            // Parse directory name (supports "enzh", "en-zh", "enja", "en-ja")
-            let from, to;
-            const name = entry.name;
-
-            if (name.includes('-')) {
-                [from, to] = name.split('-');
-            } else if (name.length >= 4) {
-                from = name.slice(0, 2);
-                to = name.slice(2, 4);
-            } else {
-                continue; // Skip invalid directory names
+// Preload model buffers (without WASM instantiation) for faster first translation
+async function preloadModelBuffers() {
+    for (const [key, modelInfo] of availableModels) {
+        try {
+            if (!modelInfo.buffers) {
+                modelInfo.buffers = await loadModelFiles(modelInfo.dir);
+                console.log(`[Server] Preloaded buffers for ${key}`);
             }
-
-            const dir = path.join(CONFIG.MODELS_DIR, entry.name);
-            const key = `${from}-${to}`;
-
-            if (loadedModels.has(key)) {
-                console.log(`[Server] Model ${key} already loaded`);
-                continue;
-            }
-
-            // Load model files (also validates they exist)
-            const buffers = await loadModelFiles(dir);
-            const aligned = {};
-            const alignments = { model: 256, lex: 64, srcvocab: 64, trgvocab: 64 };
-            for (const [k, buf] of Object.entries(buffers)) {
-                aligned[k] = createAlignedMemory(buf, alignments[k]);
-            }
-
-            const vocabList = new bergamotModule.AlignedMemoryList();
-            vocabList.push_back(aligned.srcvocab);
-            vocabList.push_back(aligned.trgvocab);
-
-            const config = [
-                'beam-size: 1', 'normalize: 1.0', 'word-penalty: 0',
-                'max-length-break: 512', 'mini-batch-words: 1024', 'workspace: 128',
-                'max-length-factor: 2.0', 'skip-cost: true', 'cpu-threads: 0',
-                'quiet: true', 'quiet-translation: true',
-                'gemm-precision: int8shiftAlphaAll', 'alignment: soft'
-            ].join('\n');
-
-            const model = new bergamotModule.TranslationModel(from, to, config, aligned.model, aligned.lex, vocabList, null);
-            const service = new bergamotModule.BlockingService({ cacheSize: 0 });
-
-            loadedModels.set(key, { instance: model, service, from, to });
-            console.log(`[Server] Loaded model: ${key}`);
-            loaded++;
+        } catch (err) {
+            console.error(`[Server] Failed to preload ${key}: ${err.message}`);
         }
     }
-
-    console.log(`[Server] Initial models: ${loaded} loaded`);
 }
 
 // ============== Start Server ==============
 
 async function start() {
     try {
-        // Initialize Bergamot
-        bergamotModule = await initBergamot();
+        // Scan for available models (don't load yet)
+        await scanModelDirectories();
 
-        // Load all models from models directory - server will not start if any model fails
-        await loadInitialModels();
+        // Preload model buffers for faster first translation
+        await preloadModelBuffers();
 
         // Start Express server
         app.listen(CONFIG.PORT, CONFIG.IP, () => {
@@ -664,7 +826,7 @@ async function start() {
 // Shutdown
 process.on('SIGTERM', () => {
     console.log('[Server] Shutting down...');
-    for (const [key, model] of loadedModels) {
+    for (const [key, model] of availableModels) {
         try {
             model.instance.delete();
             model.service.delete();
