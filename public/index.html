@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinguaSpark - Translation UI</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 1.2em;
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            font-size: 0.9em;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+
+        .status-dot.active {
+            background: #28a745;
+        }
+
+        .status-dot.inactive {
+            background: #dc3545;
+        }
+
+        .translation-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 600px) {
+            .translation-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .input-group label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        .input-group select,
+        .input-group textarea {
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        .input-group select:focus,
+        .input-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .input-group textarea {
+            min-height: 200px;
+            resize: vertical;
+            font-size: 1.1em;
+            line-height: 1.6;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #555;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .output-area {
+            min-height: 200px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 2px solid #e0e0e0;
+            font-size: 1.1em;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .output-area:empty::before {
+            content: "Translation result will appear here...";
+            color: #999;
+        }
+
+        .models-section {
+            margin-top: 20px;
+        }
+
+        .models-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .model-tag {
+            padding: 6px 12px;
+            background: #e8f4fd;
+            color: #1976d2;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .nav-link {
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .nav-link:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-msg {
+            background: #fee;
+            color: #c00;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .error-msg.active {
+            display: block;
+        }
+
+        .footer {
+            text-align: center;
+            color: rgba(255,255,255,0.7);
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>LinguaSpark</h1>
+            <p>Browser-based translation interface using Bergamot Translator WASM</p>
+        </div>
+
+        <div class="nav-links">
+            <a href="/" class="nav-link">Translation</a>
+            <a href="/monitor.html" class="nav-link">Monitor</a>
+            <a href="/docs/" class="nav-link" target="_blank">API Docs</a>
+        </div>
+
+        <div class="card">
+            <div class="status-bar">
+                <div class="status-item">
+                    <span class="status-dot" id="bergamotStatus"></span>
+                    <span>WASM Ready</span>
+                </div>
+                <div class="status-item">
+                    <span id="modelsCount">0</span> models available
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="card-title">Translation</h2>
+
+            <div class="translation-grid">
+                <div class="input-group">
+                    <label>Source Language</label>
+                    <select id="fromLang">
+                        <option value="en">English</option>
+                        <option value="zh">Chinese (Simplified)</option>
+                        <option value="zh_Hant">Chinese (Traditional)</option>
+                        <option value="ja">Japanese</option>
+                        <option value="ko">Korean</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="es">Spanish</option>
+                        <option value="ru">Russian</option>
+                        <option value="pt">Portuguese</option>
+                    </select>
+                    <label>Source Text</label>
+                    <textarea id="sourceText" placeholder="Enter text to translate..."></textarea>
+                </div>
+
+                <div class="input-group">
+                    <label>Target Language</label>
+                    <select id="toLang">
+                        <option value="zh">Chinese (Simplified)</option>
+                        <option value="en">English</option>
+                        <option value="zh_Hant">Chinese (Traditional)</option>
+                        <option value="ja">Japanese</option>
+                        <option value="ko">Korean</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="es">Spanish</option>
+                        <option value="ru">Russian</option>
+                        <option value="pt">Portuguese</option>
+                    </select>
+                    <label>Translation Result</label>
+                    <div class="output-area" id="resultText"></div>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button class="btn btn-primary" id="translateBtn">Translate</button>
+                <button class="btn btn-secondary" id="swapBtn">Swap Languages</button>
+                <button class="btn btn-secondary" id="clearBtn">Clear</button>
+            </div>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Translating...</p>
+            </div>
+
+            <div class="error-msg" id="errorMsg"></div>
+        </div>
+
+        <div class="card models-section">
+            <h2 class="card-title">Available Models</h2>
+            <div class="models-list" id="modelsList">
+                Loading...
+            </div>
+        </div>
+
+        <div class="footer">
+            Powered by Bergamot Translator (same as Firefox Translations)
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+
+        async function checkHealth() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+
+                const statusDot = document.getElementById('bergamotStatus');
+                statusDot.classList.toggle('active', data.bergamotLoaded);
+                statusDot.classList.toggle('inactive', !data.bergamotLoaded);
+
+                document.getElementById('modelsCount').textContent = data.availableModels.length;
+
+                // Update available languages based on models
+                updateLanguageOptions(data.availableModels);
+            } catch (err) {
+                console.error('Health check failed:', err);
+            }
+        }
+
+        async function fetchModels() {
+            try {
+                const response = await fetch(`${API_BASE}/models`);
+                const data = await response.json();
+
+                const modelsList = document.getElementById('modelsList');
+                if (data.models && data.models.length > 0) {
+                    modelsList.innerHTML = data.models.map(m =>
+                        `<span class="model-tag">${m.from} → ${m.to}</span>`
+                    ).join('');
+                } else {
+                    modelsList.innerHTML = '<span style="color: #999;">No models found</span>';
+                }
+            } catch (err) {
+                console.error('Failed to fetch models:', err);
+            }
+        }
+
+        function updateLanguageOptions(models) {
+            if (!models || models.length === 0) return;
+
+            const fromSelect = document.getElementById('fromLang');
+            const toSelect = document.getElementById('toLang');
+
+            // Get current selections before updating
+            const currentFrom = fromSelect.value;
+            const currentTo = toSelect.value;
+
+            // Extract available language pairs from model objects
+            const languages = new Set();
+            models.forEach(m => {
+                // Handle both string format ("en-zh") and object format ({from, to})
+                const from = typeof m === 'string' ? m.split('-')[0] : m.from;
+                const to = typeof m === 'string' ? m.split('-')[1] : m.to;
+                if (from) languages.add(from);
+                if (to) languages.add(to);
+            });
+
+            const langNames = {
+                'zh': 'Chinese (Simplified)',
+                'zh_Hant': 'Chinese (Traditional)',
+                'en': 'English',
+                'ja': 'Japanese',
+                'ko': 'Korean',
+                'fr': 'French',
+                'de': 'German',
+                'es': 'Spanish',
+                'ru': 'Russian',
+                'pt': 'Portuguese'
+            };
+
+            // Get all options (remove all)
+            const fromOptions = Array.from(fromSelect.querySelectorAll('option'));
+            fromOptions.forEach(opt => opt.remove());
+            const toOptions = Array.from(toSelect.querySelectorAll('option'));
+            toOptions.forEach(opt => opt.remove());
+
+            // Add languages to both selects
+            const sortedLangs = Array.from(languages).sort();
+            sortedLangs.forEach(lang => {
+                const option1 = document.createElement('option');
+                option1.value = lang;
+                option1.textContent = langNames[lang] || lang;
+                fromSelect.appendChild(option1);
+
+                const option2 = document.createElement('option');
+                option2.value = lang;
+                option2.textContent = langNames[lang] || lang;
+                toSelect.appendChild(option2);
+            });
+
+            // Restore previous selections if still valid
+            if (languages.has(currentFrom)) {
+                fromSelect.value = currentFrom;
+            }
+            if (languages.has(currentTo)) {
+                toSelect.value = currentTo;
+            }
+        }
+
+        async function translate() {
+            const sourceText = document.getElementById('sourceText').value.trim();
+            const fromLang = document.getElementById('fromLang').value;
+            const toLang = document.getElementById('toLang').value;
+            const resultEl = document.getElementById('resultText');
+            const loadingEl = document.getElementById('loading');
+            const errorEl = document.getElementById('errorMsg');
+            const translateBtn = document.getElementById('translateBtn');
+
+            if (!sourceText) {
+                showError('Please enter some text to translate');
+                return;
+            }
+
+            if (!toLang) {
+                showError('Please select a target language');
+                return;
+            }
+
+            // Hide previous results and errors
+            resultEl.textContent = '';
+            errorEl.classList.remove('active');
+
+            // Show loading
+            loadingEl.classList.add('active');
+            translateBtn.disabled = true;
+
+            try {
+                const response = await fetch(`${API_BASE}/translate`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text: sourceText,
+                        from: fromLang,
+                        to: toLang
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resultEl.textContent = data.text;
+                } else {
+                    showError(data.error || 'Translation failed');
+                }
+            } catch (err) {
+                showError('Network error: ' + err.message);
+            } finally {
+                loadingEl.classList.remove('active');
+                translateBtn.disabled = false;
+            }
+        }
+
+        function showError(message) {
+            const errorEl = document.getElementById('errorMsg');
+            errorEl.textContent = message;
+            errorEl.classList.add('active');
+        }
+
+        function swapLanguages() {
+            const fromSelect = document.getElementById('fromLang');
+            const toSelect = document.getElementById('toLang');
+            const sourceText = document.getElementById('sourceText');
+            const resultText = document.getElementById('resultText');
+
+            const temp = fromSelect.value;
+            fromSelect.value = toSelect.value;
+            toSelect.value = temp;
+
+            // Swap text content
+            const tempText = sourceText.value;
+            sourceText.value = resultText.textContent;
+            resultText.textContent = tempText;
+        }
+
+        function clearAll() {
+            document.getElementById('sourceText').value = '';
+            document.getElementById('resultText').textContent = '';
+            document.getElementById('errorMsg').classList.remove('active');
+        }
+
+        function showError(message) {
+            const errorEl = document.getElementById('errorMsg');
+            errorEl.textContent = message;
+            errorEl.classList.add('active');
+        }
+
+        // Event listeners
+        document.getElementById('translateBtn').addEventListener('click', translate);
+        document.getElementById('swapBtn').addEventListener('click', swapLanguages);
+        document.getElementById('clearBtn').addEventListener('click', clearAll);
+
+        // Enter key to translate
+        document.getElementById('sourceText').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                translate();
+            }
+        });
+
+        // Initialize
+        checkHealth();
+        fetchModels();
+    </script>
+</body>
+</html>

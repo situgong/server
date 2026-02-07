@@ -7,52 +7,41 @@ main:
         - name: download models
           script: |
             set -e
-            mkdir -p models-enzh/enzh
+            mkdir -p models-enzh/enzh models-enja/enja
             models_json_url="https://storage.googleapis.com/moz-fx-translations-data--303e-prod-translations-data/db/models.json"
             echo "Fetching models.json from $models_json_url"
-            curl -fsSL "$models_json_url" -o models.json || { echo "Failed to download models.json"; exit 1; }
+            curl -fsSL "$models_json_url" -o models.json
             base_url=$(jq -r '.baseUrl' models.json)
-            if [ -z "$base_url" ] || [ "$base_url" = "null" ]; then
-              echo "Failed to extract baseUrl from models.json"
-              exit 1
-            fi
-            echo "Base URL: $base_url"
-            # Get the first en-zh model (architecture: base)
-            model_data=$(jq -r '.models."en-zh"[0]' models.json)
-            if [ -z "$model_data" ] || [ "$model_data" = "null" ]; then
-              echo "No en-zh model found in models.json"
-              exit 1
-            fi
-            # Extract file paths
-            lex_path=$(echo "$model_data" | jq -r '.files.lexicalShortlist.path')
-            model_path=$(echo "$model_data" | jq -r '.files.model.path')
-            src_vocab_path=$(echo "$model_data" | jq -r '.files.srcVocab.path')
-            trg_vocab_path=$(echo "$model_data" | jq -r '.files.trgVocab.path')
-            files=(
-              "$lex_path"
-              "$model_path"
-              "$src_vocab_path"
-              "$trg_vocab_path"
-            )
-            for file_path in "${files[@]}"; do
-              if [ -z "$file_path" ] || [ "$file_path" = "null" ]; then
-                echo "Invalid file path in model data"
-                exit 1
-              fi
+
+            echo "Downloading en-zh model..."
+            model_data_enzh=$(jq -r '.models."en-zh"[0]' models.json)
+            for key in lex model srcVocab trgVocab; do
+              file_path=$(echo "$model_data_enzh" | jq -r ".files.${key}.path")
               file=$(basename "$file_path")
-              echo "Downloading $file from $base_url/$file_path"
-              curl -fsSL "$base_url/$file_path" -o "models-enzh/enzh/$file" || { echo "Failed to download $file"; exit 1; }
-              gunzip -f "models-enzh/enzh/$file"
-              extracted_file="${file%.gz}"
-              echo "$extracted_file downloaded and extracted"
+              echo "  Downloading $file"
+              curl -fsSL "$base_url/$file_path" -o "models-enzh/enzh/$file"
+              gunzip -f "models-enzh/enzh/$file" 2>/dev/null || true
             done
+
+            echo "Downloading en-ja model..."
+            model_data_enja=$(jq -r '.models."en-ja"[0]' models.json)
+            for key in lex model srcVocab trgVocab; do
+              file_path=$(echo "$model_data_enja" | jq -r ".files.${key}.path")
+              file=$(basename "$file_path")
+              echo "  Downloading $file"
+              curl -fsSL "$base_url/$file_path" -o "models-enja/enja/$file"
+              gunzip -f "models-enja/enja/$file" 2>/dev/null || true
+            done
+
             rm -f models.json
-            echo "Download completed. Model structure:"
-            pwd
-            ls -R models-enzh
+            echo "Download completed"
         - name: docker login
           script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
         - name: docker build
-          script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest -f Dockerfile.enzh .
+          script: |
+            # Copy models
+            cp -r models-enzh/enzh models/
+            cp -r models-enja/enja models/
+            docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest .
         - name: docker push
           script: docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest

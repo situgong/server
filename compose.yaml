@@ -1,18 +1,19 @@
 services:
   linguaspark:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: linguaspark:latest
+    build: .
+    container_name: linguaspark-translation
     ports:
-      - "3000:3000"
+      - "13000:3000"
     volumes:
       - ./models:/app/models
+      - ./public:/app/public
     environment:
       API_KEY: ""
+      NODE_ENV: production
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "echo -e 'GET /health HTTP/1.1\r\nHost: localhost:3000\r\n\r\n' | timeout 5 bash -c 'cat > /dev/tcp/localhost/3000' && echo 'Health check passed'"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
       interval: 30s
       timeout: 10s
+      start_period: 15s
       retries: 3

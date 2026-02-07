@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinguaSpark - Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            color: #fff;
+            font-size: 1.8em;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 10px;
+        }
+
+        .nav-link {
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .nav-link:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            color: #888;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
+        .card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .card-title {
+            font-size: 1.2em;
+            color: #fff;
+        }
+
+        .refresh-info {
+            color: #888;
+            font-size: 0.85em;
+        }
+
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+
+        .log-table th {
+            text-align: left;
+            padding: 12px 10px;
+            color: #888;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            font-weight: 500;
+        }
+
+        .log-table td {
+            padding: 12px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            vertical-align: top;
+        }
+
+        .log-table tr:hover {
+            background: rgba(255,255,255,0.02);
+        }
+
+        .timestamp {
+            white-space: nowrap;
+            color: #666;
+            font-size: 0.85em;
+        }
+
+        .lang-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            background: rgba(102, 126, 234, 0.2);
+            color: #667eea;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+
+        .lang-arrow {
+            color: #555;
+            margin: 0 5px;
+        }
+
+        .text-cell {
+            max-width: 300px;
+        }
+
+        .source-text {
+            color: #aaa;
+            word-break: break-word;
+        }
+
+        .translated-text {
+            color: #667eea;
+            font-weight: 500;
+            word-break: break-word;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 15px;
+            opacity: 0.3;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.3s;
+        }
+
+        .btn-secondary {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255,255,255,0.15);
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .status-dot.active {
+            background: #28a745;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.inactive {
+            background: #dc3545;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .log-row {
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes highlight {
+            0% { background: rgba(102, 126, 234, 0.3); }
+            100% { background: transparent; }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .table-container {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .table-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .table-container::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .table-container::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.2);
+            border-radius: 4px;
+        }
+
+        .footer {
+            text-align: center;
+            color: rgba(255,255,255,0.4);
+            padding: 20px;
+            font-size: 0.85em;
+        }
+
+        .system-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .system-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 15px;
+        }
+
+        .system-label {
+            color: #888;
+            font-size: 0.85em;
+            margin-bottom: 8px;
+        }
+
+        .system-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .system-bar {
+            height: 6px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+
+        .system-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>LinguaSpark Monitor</h1>
+            <div class="nav-links">
+                <a href="/" class="nav-link">Translation</a>
+                <a href="/docs/" class="nav-link" target="_blank">API Docs</a>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="totalEntries">0</div>
+                <div class="stat-label">Total Entries (20 min)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="lastMinute">0</div>
+                <div class="stat-label">Last Minute</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="serverUptime">0s</div>
+                <div class="stat-label">Server Uptime</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">
+                    <span class="status-dot active" id="connectionStatus"></span>
+                </div>
+                <div class="stat-label">Connection</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">System Resources</h2>
+                <div>
+                    <span class="refresh-info">Manual</span>
+                    <button class="btn btn-secondary" onclick="fetchSystemStats()" style="margin-left: 10px;">Refresh</button>
+                </div>
+            </div>
+            <div class="system-grid">
+                <div class="system-card">
+                    <div class="system-label">Memory (Heap)</div>
+                    <div class="system-value" id="memHeap">0 MB</div>
+                    <div class="system-bar">
+                        <div class="system-bar-fill" id="memHeapBar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="system-card">
+                    <div class="system-label">Memory (RSS)</div>
+                    <div class="system-value" id="memRss">0 MB</div>
+                    <div class="system-bar">
+                        <div class="system-bar-fill" id="memRssBar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="system-card">
+                    <div class="system-label">CPU Usage</div>
+                    <div class="system-value" id="cpuUsage">0 ms</div>
+                    <div style="font-size: 0.8em; color: #666; margin-top: 5px;">
+                        <span id="cpuUser">User: 0ms</span> |
+                        <span id="cpuSystem">System: 0ms</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Translation Log</h2>
+                <div>
+                    <span class="refresh-info">Auto-refresh: 2s</span>
+                    <button class="btn btn-secondary" onclick="clearLogs()" style="margin-left: 10px;">Clear</button>
+                </div>
+            </div>
+            <div class="table-container" id="logContainer">
+                <table class="log-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 160px;">Time</th>
+                            <th style="width: 120px;">Languages</th>
+                            <th>Source</th>
+                            <th>Translated</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logTableBody">
+                    </tbody>
+                </table>
+                <div class="empty-state" id="emptyState">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <p>No translations in the last 20 minutes</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            Translation Monitor - Shows logs from the last 20 minutes
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        let lastFetchTime = 0;
+        let connectionErrors = 0;
+        const MAX_DISPLAYED = 50;
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString('zh-CN', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        function formatUptime(seconds) {
+            if (seconds < 60) return Math.round(seconds) + 's';
+            if (seconds < 3600) return Math.floor(seconds / 60) + 'm ' + Math.round(seconds % 60) + 's';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            return h + 'h ' + m + 'm';
+        }
+
+        async function fetchStats() {
+            try {
+                const response = await fetch(`${API_BASE}/monitor/stats`);
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('totalEntries').textContent = data.totalEntries;
+                    document.getElementById('lastMinute').textContent = data.lastMinute;
+                    document.getElementById('serverUptime').textContent = formatUptime(data.serverUptime);
+                    updateConnectionStatus(true);
+                } else {
+                    updateConnectionStatus(false);
+                }
+            } catch (err) {
+                console.error('Failed to fetch stats:', err);
+                updateConnectionStatus(false);
+            }
+        }
+
+        async function fetchLogs() {
+            try {
+                const response = await fetch(`${API_BASE}/monitor/logs?limit=100`);
+                if (response.ok) {
+                    const data = await response.json();
+                    updateLogTable(data.logs);
+                    connectionErrors = 0;
+                    updateConnectionStatus(true);
+                } else if (response.status === 502 || response.status === 503 || response.status === 504) {
+                    // Server temporarily unavailable - retry later
+                    connectionErrors++;
+                    if (connectionErrors >= 5) {
+                        updateConnectionStatus(false);
+                    }
+                } else {
+                    connectionErrors++;
+                    updateConnectionStatus(false);
+                }
+            } catch (err) {
+                connectionErrors++;
+                console.error('Failed to fetch logs:', err.message);
+                if (connectionErrors >= 3) {
+                    updateConnectionStatus(false);
+                }
+            }
+        }
+
+        async function fetchStats() {
+            try {
+                const response = await fetch(`${API_BASE}/monitor/stats`);
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('totalEntries').textContent = data.totalEntries;
+                    document.getElementById('lastMinute').textContent = data.lastMinute;
+                    document.getElementById('serverUptime').textContent = formatUptime(data.serverUptime);
+                }
+            } catch (err) {
+                console.error('Failed to fetch stats:', err.message);
+            }
+        }
+
+        function updateLogTable(logs) {
+            const tbody = document.getElementById('logTableBody');
+            const emptyState = document.getElementById('emptyState');
+
+            if (!logs || logs.length === 0) {
+                tbody.innerHTML = '';
+                emptyState.style.display = 'block';
+                return;
+            }
+
+            emptyState.style.display = 'none';
+
+            // Take only the newest MAX_DISPLAYED entries
+            const recentLogs = logs.slice(-MAX_DISPLAYED);
+
+            // Reverse to show newest first
+            const logsCopy = [...recentLogs].reverse();
+
+            // Build HTML
+            const html = logsCopy.map(log => `
+                <tr class="log-row">
+                    <td class="timestamp">${formatTime(log.timestamp)}</td>
+                    <td>
+                        <span class="lang-badge">${log.from}</span>
+                        <span class="lang-arrow">→</span>
+                        <span class="lang-badge">${log.to}</span>
+                    </td>
+                    <td class="text-cell">
+                        <div class="source-text">${escapeHtml(log.source)}</div>
+                    </td>
+                    <td class="text-cell">
+                        <div class="translated-text">${escapeHtml(log.translated)}</div>
+                    </td>
+                </tr>
+            `).join('');
+
+            tbody.innerHTML = html;
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function updateConnectionStatus(connected) {
+            const dot = document.getElementById('connectionStatus');
+            dot.className = 'status-dot ' + (connected ? 'active' : 'inactive');
+        }
+
+        async function clearLogs() {
+            try {
+                await fetch(`${API_BASE}/monitor/clear`, { method: 'POST' });
+                connectionErrors = 0;
+                document.getElementById('logTableBody').innerHTML = '';
+                document.getElementById('emptyState').style.display = 'block';
+                fetchStats();
+            } catch (err) {
+                console.error('Failed to clear logs:', err);
+            }
+        }
+
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+        }
+
+        async function fetchSystemStats() {
+            try {
+                const response = await fetch(`${API_BASE}/monitor/system`);
+                if (response.ok) {
+                    const data = await response.json();
+
+                    // Memory Heap
+                    const heapUsed = data.memory.heapUsed;
+                    const heapTotal = data.memory.heapTotal;
+                    const heapPercent = heapTotal > 0 ? Math.round((heapUsed / heapTotal) * 100) : 0;
+                    document.getElementById('memHeap').textContent = formatBytes(heapUsed);
+                    document.getElementById('memHeapBar').style.width = Math.min(heapPercent, 100) + '%';
+
+                    // Memory RSS
+                    const rss = data.memory.rss;
+                    document.getElementById('memRss').textContent = formatBytes(rss);
+                    // Estimate RSS bar (assuming 2GB max for visualization)
+                    const rssPercent = Math.min((rss / (2 * 1024 * 1024 * 1024)) * 100, 100);
+                    document.getElementById('memRssBar').style.width = rssPercent + '%';
+
+                    // CPU Usage
+                    const cpu = data.cpu.usage;
+                    const cpuTotal = cpu.user + cpu.system;
+                    document.getElementById('cpuUsage').textContent = (cpuTotal / 1000000).toFixed(2) + ' ms';
+                    document.getElementById('cpuUser').textContent = 'User: ' + (cpu.user / 1000000).toFixed(1) + 'ms';
+                    document.getElementById('cpuSystem').textContent = 'System: ' + (cpu.system / 1000000).toFixed(1) + 'ms';
+                }
+            } catch (err) {
+                console.error('Failed to fetch system stats:', err.message);
+            }
+        }
+
+        // Initial load
+        fetchStats();
+        fetchLogs();
+        fetchSystemStats();
+
+        // Auto refresh
+        setInterval(fetchLogs, 2000);
+    </script>
+</body>
+</html>

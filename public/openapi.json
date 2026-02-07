@@ -1,0 +1,486 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "LinguaSpark API",
+    "version": "0.1.0",
+    "description": "Node.js translation service using Bergamot WASM engine (same as Firefox Translations)",
+    "license": {
+      "name": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Current server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Translation",
+      "description": "Translation endpoints"
+    },
+    {
+      "name": "Models",
+      "description": "Model management"
+    },
+    {
+      "name": "System",
+      "description": "System and health endpoints"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Health check",
+        "description": "Check server health and available models",
+        "responses": {
+          "200": {
+            "description": "Server is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "bergamotLoaded": { "type": "boolean", "example": true },
+                    "availableModels": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "example": ["en-zh", "zh-en", "en-ja"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/detect": {
+      "post": {
+        "tags": ["System"],
+        "summary": "Detect language",
+        "description": "Detect the language of the given text",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["text"],
+                "properties": {
+                  "text": { "type": "string", "description": "Text to analyze" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Language detected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "language": { "type": "string", "example": "zh" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing text"
+          }
+        }
+      }
+    },
+    "/translate": {
+      "post": {
+        "tags": ["Translation"],
+        "summary": "Translate text",
+        "description": "Translate text from source language to target language",
+        "security": [{ "api_key": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["text", "to"],
+                "properties": {
+                  "text": { "type": "string", "description": "Text to translate" },
+                  "from": { "type": "string", "description": "Source language (optional, 'auto' for auto-detection)" },
+                  "to": { "type": "string", "description": "Target language" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Translation successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "text": { "type": "string", "description": "Translated text" },
+                    "from": { "type": "string", "example": "zh" },
+                    "to": { "type": "string", "example": "en" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing required fields"
+          },
+          "401": {
+            "description": "Invalid or missing API key"
+          },
+          "500": {
+            "description": "Translation error"
+          }
+        }
+      }
+    },
+    "/kiss": {
+      "post": {
+        "tags": ["Translation"],
+        "summary": "Kiss Translator API",
+        "description": "Compatible API for Kiss Translator",
+        "security": [{ "api_key": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["text", "to"],
+                "properties": {
+                  "text": { "type": "string" },
+                  "from": { "type": "string" },
+                  "to": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "OK" },
+          "400": { "description": "Missing fields" },
+          "401": { "description": "Unauthorized" }
+        }
+      }
+    },
+    "/imme": {
+      "post": {
+        "tags": ["Translation"],
+        "summary": "Immersive Translate API (batch)",
+        "description": "Batch translation endpoint for Immersive Translate",
+        "security": [{ "api_key": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["target_lang", "text_list"],
+                "properties": {
+                  "source_lang": { "type": "string" },
+                  "target_lang": { "type": "string" },
+                  "text_list": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "translations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "detected_source_lang": { "type": "string" },
+                          "text": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hcfy": {
+      "post": {
+        "tags": ["Translation"],
+        "summary": "HCFY API",
+        "description": "Compatible API for HCFY (Hu Hai Chinese For You)",
+        "security": [{ "api_key": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["text", "destination"],
+                "properties": {
+                  "text": { "type": "string" },
+                  "source": { "type": "string" },
+                  "destination": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "text": { "type": "string" },
+                    "from": { "type": "string" },
+                    "to": { "type": "string" },
+                    "result": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deeplx": {
+      "post": {
+        "tags": ["Translation"],
+        "summary": "DeepLX API",
+        "description": "Compatible API for DeepLX",
+        "security": [{ "api_key": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["text", "source_lang", "target_lang"],
+                "properties": {
+                  "text": { "type": "string" },
+                  "source_lang": { "type": "string" },
+                  "target_lang": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": { "type": "number", "example": 200 },
+                    "id": { "type": "number" },
+                    "data": { "type": "string" },
+                    "alternatives": { "type": "array" },
+                    "source_lang": { "type": "string" },
+                    "target_lang": { "type": "string" },
+                    "method": { "type": "string", "example": "Free" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Missing fields" }
+        }
+      }
+    },
+    "/translate_mtranserver": {
+      "post": {
+        "tags": ["Translation"],
+        "summary": "MTranServer Translation API",
+        "description": "Single translation using MTranServer compatible API",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["from", "to", "text"],
+                "properties": {
+                  "from": { "type": "string", "description": "Source language" },
+                  "to": { "type": "string", "description": "Target language" },
+                  "text": { "type": "string", "description": "Text to translate" },
+                  "html": { "type": "boolean", "description": "Treat as HTML" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Missing required fields" }
+        }
+      }
+    },
+    "/translate_mtranserver/batch": {
+      "post": {
+        "tags": ["Translation"],
+        "summary": "MTranServer Batch Translation API",
+        "description": "Batch translation using MTranServer compatible API",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["from", "to", "texts"],
+                "properties": {
+                  "from": { "type": "string" },
+                  "to": { "type": "string" },
+                  "texts": { "type": "array", "items": { "type": "string" } },
+                  "html": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Missing required fields" }
+        }
+      }
+    },
+    "/models": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "List available models",
+        "description": "Get list of all registered translation models",
+        "security": [{ "api_key": [] }],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": { "type": "string" },
+                          "from": { "type": "string" },
+                          "to": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models/load": {
+      "post": {
+        "tags": ["Models"],
+        "summary": "Load a model",
+        "description": "Register and preload a model for on-demand loading",
+        "security": [{ "api_key": [] }],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "from": { "type": "string", "description": "Source language" },
+                  "to": { "type": "string", "description": "Target language" },
+                  "modelDir": { "type": "string", "description": "Custom model directory" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Model loaded successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "key": { "type": "string" },
+                    "from": { "type": "string" },
+                    "to": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Missing from or to" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "api_key": {
+        "type": "apiKey",
+        "name": "Authorization",
+        "in": "header",
+        "description": "API key authentication (use header: Authorization: Bearer <key>)"
+      }
+    }
+  }
+}

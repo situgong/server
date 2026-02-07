@@ -3,7 +3,7 @@
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Repository-blue.svg)](https://github.com/LinguaSpark/server)
 [![Docker Image](https://img.shields.io/badge/Docker-Image-blue.svg)](https://github.com/LinguaSpark/server/pkgs/container/translation-service)
 
-A lightweight multilingual translation service based on Rust and Bergamot translation engine, compatible with multiple translation frontend APIs.
+A lightweight multilingual translation service based on Node.js and Bergamot WASM translation engine, compatible with multiple translation frontend APIs.
 
 [简体中文](README_ZH.md)
 
@@ -11,103 +11,107 @@ A lightweight multilingual translation service based on Rust and Bergamot transl
 
 This project originated when I discovered the [MTranServer](https://github.com/xxnuo/MTranServer/) repository, which uses [Firefox Translations Models](https://github.com/mozilla/firefox-translations-models/) for machine translation and is compatible with APIs like Immersive Translate and Kiss Translator, but found that it wasn't open-sourced yet.
 
-While searching for similar projects, I found Mozilla's [translation-service](https://github.com/mozilla/translation-service/), which works but hasn't been updated for a year and isn't compatible with Immersive Translate or Kiss Translator APIs. Since that project is written in C++ and I'm not very familiar with C++, I rewrote this project in Rust.
+While searching for similar projects, I found Mozilla's [translation-service](https://github.com/mozilla/translation-service/), which works but hasn't been updated for a year and isn't compatible with Immersive Translate or Kiss Translator APIs. I built this project using Node.js with the Bergamot WASM runtime.
 
 ## Features
 
-- 💪 Written in Rust for excellent performance and low memory footprint
-- 🔄 Based on [Bergamot Translator](https://github.com/browsermt/bergamot-translator) engine used in Firefox
+- 🚀 Built on Node.js >= 18 for simplicity and broad compatibility
+- 🔄 Based on [Bergamot Translator](https://github.com/browsermt/bergamot-translator) WASM engine used in Firefox
 - 🧠 Compatible with [Firefox Translations Models](https://github.com/mozilla/firefox-translations-models/)
+- 🌐 Browser-based translation UI (no API tools needed)
+- 📚 Interactive API documentation via Swagger UI
 - 🔍 Built-in language detection with automatic source language identification
-- 🔌 Supports multiple translation API formats:
+- 💾 On-demand model loading with memory optimization (only one model active at a time)
+- 🔀 Pivot translation via English when direct model unavailable
+- 🔌 Multiple translation API compatibility:
   - Native API
   - [Immersive Translate](https://immersivetranslate.com/) API
   - [Kiss Translator](https://www.kis-translator.com/) API
   - [HCFY](https://hcfy.app/) API
   - [DeepLX](https://github.com/OwO-Network/DeepLX) API
+  - MTranServer API (single and batch)
 - 🔑 API key protection support
-- 🐳 Docker deployment ready
 
 ## Tech Stack
 
-- **Web Framework**: [Axum](https://github.com/tokio-rs/axum)
-- **Translation Engine**: [Bergamot Translator](https://github.com/browsermt/bergamot-translator)
+- **Web Framework**: [Express](https://expressjs.com/)
+- **Translation Engine**: [Bergamot Translator WASM](https://github.com/browsermt/bergamot-translator)
 - **Translation Models**: [Firefox Translations Models](https://github.com/mozilla/firefox-translations-models/)
-- **Language Detection**: [Whichlang](https://github.com/quickwit-oss/whichlang)
+- **Language Detection**: [franc](https://github.com/wooorm/franc)
+
+## Quick Start
+
+```bash
+# Install dependencies
+npm install
+
+# Start server
+npm start
+
+# Server runs on http://127.0.0.1:3000
+
+# Development with hot reload
+npm run dev
+```
+
+## Web Interface
+
+After starting the server, access:
+
+- **Translation UI**: http://127.0.0.1:13000/ - Browser-based translation interface
+- **API Documentation**: http://127.0.0.1:13000/docs/ - Swagger UI for all API endpoints
+- **Monitor**: http://127.0.0.1:13000/monitor.html - Real-time translation log and system resources monitoring
 
 ## Deployment
 
-Docker is the **only recommended** deployment method for this service.
+### Local Deployment
 
-### Option 1: Using pre-built image (with your own translation models)
+1. Create models directory:
+```bash
+mkdir -p models
+```
+
+2. Download translation models (see [Models](#translation-models) section)
+
+3. Start the service:
+```bash
+npm start
+```
+
+### Docker Deployment
 
 ```bash
 # Create models directory
 mkdir -p models
 # Download your models here
+
 # Pull and start container
 docker run -d --name translation-service \
-  -p 3000:3000 \
+  -p 13000:3000 \
   -v "$(pwd)/models:/app/models" \
   ghcr.io/linguaspark/server:main
 ```
 
-### Option 2: Using pre-built image with English-Chinese model (China mirror)
+### Docker Compose
 
-```bash
-docker run -d --name translation-service \
-  -p 3000:3000 \
-  docker.cnb.cool/aalivexy/translation-service:latest
-```
-
-> Note: The English-Chinese model image is about 70MiB, and each worker uses approximately 300MiB+ of memory with low translation latency.
-
-### Docker Compose Deployment
-
-Create a `compose.yaml` file:
+Create `compose.yaml`:
 
 ```yaml
 services:
   translation-service:
     image: ghcr.io/linguaspark/server:main
     ports:
-      - "3000:3000"
+      - "13000:3000"
     volumes:
       - ./models:/app/models
     environment:
-      API_KEY: "your_api_key"  # Optional, leave empty to disable API key protection
+      API_KEY: "your_api_key"  # Optional, leave empty to disable
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "echo -e 'GET /health HTTP/1.1\r\nHost: localhost:3000\r\n\r\n' | timeout 5 bash -c 'cat > /dev/tcp/localhost/3000' && echo 'Health check passed'"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 ```
 
 Start the service:
-
 ```bash
 docker compose up -d
-```
-
-### Custom Image for Specific Language Pairs
-
-If you need to create a custom image with specific language pairs, use this Dockerfile template:
-
-```dockerfile
-FROM ghcr.io/linguaspark/server:main
-
-COPY ./your-models-directory /app/models
-
-ENV MODELS_DIR=/app/models
-ENV NUM_WORKERS=1
-ENV IP=0.0.0.0
-ENV PORT=3000
-ENV RUST_LOG=info
-
-EXPOSE 3000
-
-ENTRYPOINT ["/app/server"]
 ```
 
 ## Translation Models
@@ -115,45 +119,50 @@ ENTRYPOINT ["/app/server"]
 ### Getting Models
 
 1. Download pre-trained models from [Firefox Translations Models](https://github.com/mozilla/firefox-translations-models/)
-2. Place them in the models directory with the following structure:
+2. Place them in the models directory:
 
 ```
 models/
-├── enzh/  # Language pair directory name format: "[source language code][target language code]"
+├── en-zh/  # English to Chinese
 │   ├── model.intgemm8.bin  # Translation model
 │   ├── model.s2t.bin       # Shortlist file
-│   ├── srcvocab.spm        # Source language vocabulary
-│   └── trgvocab.spm        # Target language vocabulary
-└── zhen/  # Another language pair
+│   ├── srcvocab.xxen.spm    # Source vocabulary
+│   └── trgvocab.xxen.spm    # Target vocabulary
+└── zh-en/  # Chinese to English
     └── ...
 ```
 
-### Language Pair Support
+### Directory Naming Convention
 
-The translation service will automatically scan all language pair directories under the `models` directory and load them. Directory names should follow the `[source language][target language]` format using [ISO 639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) language codes.
+Model directories use `[source]-[target]` or `[source][target]` format with [ISO 639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes):
+- `en-zh` or `enzh` - English to Chinese
+- `zh-en` or `zhen` - Chinese to English
+- `en-ja` - English to Japanese
+- `ja-en` - Japanese to English
+
+The service auto-discovers all model directories on startup.
 
 ## Environment Variables
 
-| Variable Name | Description | Default Value |
-|---------------|-------------|---------------|
-| `MODELS_DIR`  | Path to models directory | `/app/models` |
-| `NUM_WORKERS` | Number of translation worker threads | `1` |
-| `IP`          | IP address for the service to listen on | `127.0.0.1` |
-| `PORT`        | Port for the service to listen on | `3000` |
-| `API_KEY`     | API key (leave empty to disable) | `""` |
-| `RUST_LOG`    | Log level | `info` |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Server port | `3000` |
+| `IP` | Bind address | `127.0.0.1` |
+| `MODELS_DIR` | Models directory | `./models` |
+| `API_KEY` | API key (empty to disable) | `""` |
+| `WASM_PATH` | WASM binary path | `wasm/bergamot-translator.wasm` |
+| `JS_PATH` | JS glue code path | `wasm/bergamot-translator.js` |
 
 ## API Endpoints
 
 ### Native API
 
-#### Translate
-
+**Translate**
 ```
 POST /translate
 ```
 
-Request body:
+Request:
 ```json
 {
   "text": "Hello world",
@@ -171,13 +180,12 @@ Response:
 }
 ```
 
-#### Language Detection
-
+**Language Detection**
 ```
 POST /detect
 ```
 
-Request body:
+Request:
 ```json
 {
   "text": "Hello world"
@@ -193,93 +201,46 @@ Response:
 
 ### Compatible APIs
 
-#### Immersive Translate API
-
+**Immersive Translate API**
 ```
 POST /imme
 ```
-
-Request body:
 ```json
 {
-  "source_lang": "auto",  // Optional, omit to auto-detect
+  "source_lang": "auto",
   "target_lang": "zh",
-  "text_list": ["Hello world", "How are you?"]
+  "text_list": ["Hello world"]
 }
 ```
 
-Response:
-```json
-{
-  "translations": [
-    {
-      "detected_source_lang": "en",
-      "text": "你好世界"
-    },
-    {
-      "detected_source_lang": "en",
-      "text": "你好吗？"
-    }
-  ]
-}
-```
-
-#### Kiss Translator API
-
+**Kiss Translator API**
 ```
 POST /kiss
 ```
-
-Request body:
 ```json
 {
   "text": "Hello world",
-  "from": "en",  // Optional, omit to auto-detect
-  "to": "zh"
-}
-```
-
-Response:
-```json
-{
-  "text": "你好世界",
   "from": "en",
   "to": "zh"
 }
 ```
 
-#### HCFY API
-
+**HCFY API**
 ```
 POST /hcfy
 ```
-
-Request body:
 ```json
 {
   "text": "Hello world",
-  "source": "英语",  // Optional, omit to auto-detect
+  "source": "英语",
   "destination": ["中文(简体)"]
 }
 ```
 
-Response:
-```json
-{
-  "text": "Hello world",
-  "from": "英语",
-  "to": "中文(简体)",
-  "result": ["你好世界"]
-}
-```
-
-#### DeepLX API
-
+**DeepLX API**
 ```
 POST /deeplx
 ```
-
-Request body:
 ```json
 {
   "text": "Hello world",
@@ -288,42 +249,67 @@ Request body:
 }
 ```
 
-Response:
+**MTranServer API (Single)**
+```
+POST /translate_mtranserver
+```
 ```json
 {
-  "code": 200,
-  "id": 1744646400,
-  "data": "你好世界",
-  "alternatives": [],
-  "source_lang": "EN",
-  "target_lang": "ZH",
-  "method": "Free"
+  "from": "en",
+  "to": "zh",
+  "text": "Hello world",
+  "html": false
 }
 ```
 
-### Health Check
+Response:
+```json
+{
+  "result": "你好世界"
+}
+```
 
+**MTranServer API (Batch)**
+```
+POST /translate_mtranserver/batch
+```
+```json
+{
+  "from": "en",
+  "to": "zh",
+  "texts": ["Hello world", "How are you?"],
+  "html": false
+}
+```
+
+Response:
+```json
+{
+  "results": ["你好世界", "你好吗?"]
+}
+```
+
+**Health Check**
 ```
 GET /health
 ```
 
-Response:
-```json
-{
-  "status": "ok"
-}
+**System Stats (Monitor)**
 ```
+GET /monitor/system
+```
+Returns memory usage (heap, RSS, external) and CPU usage in microseconds.
 
 ## Authentication
 
-If the `API_KEY` environment variable is set, all API requests must provide authentication credentials using one of the following methods:
+When `API_KEY` is set, authenticate using:
 
-1. Authorization header: `Authorization: Bearer your_api_key`
-2. Query parameter: `?token=your_api_key`
+1. Header: `Authorization: Bearer <key>`
+2. Query: `?token=<key>`
 
 ## License
 
-This project is open-sourced under the AGPL-3.0 license.
+AGPL-3.0
 
 ## Acknowledgements
 
