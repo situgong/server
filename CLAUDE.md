@@ -86,6 +86,35 @@ public/            - Web UI and Swagger documentation
 | `WASM_PATH` | `wasm/bergamot-translator.wasm` | WASM binary path |
 | `JS_PATH` | `wasm/bergamot-translator.js` | JS glue code path |
 
+## Docker Deployment
+
+```bash
+# Create models directory
+mkdir -p models
+# Download your models here
+
+# Run with Docker
+docker run -d --name translation-service \
+  -p 3000:3000 \
+  -v "$(pwd)/models:/app/models" \
+  ghcr.io/linguaspark/server:main
+```
+
+## Docker Compose
+
+```yaml
+services:
+  translation-service:
+    image: ghcr.io/linguaspark/server:main
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./models:/app/models
+    environment:
+      API_KEY: "your_api_key"  # Optional, leave empty to disable
+    restart: unless-stopped
+```
+
 ## Authentication
 
 When `API_KEY` is set, use header `Authorization: Bearer <key>` or query `?token=<key>`.
