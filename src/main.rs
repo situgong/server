@@ -17,11 +17,11 @@ use tower_http::{
     },
     trace::TraceLayer,
 };
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 mod endpoint;
+// Removed wasm_engine module - now using Node.js sidecar
 mod translation;
-mod wasm_engine;
 
 const ENV_MODELS_PATH: &str = "MODELS_DIR";
 const ENV_NUM_WORKERS: &str = "NUM_WORKERS";
@@ -29,6 +29,7 @@ const ENV_SERVER_IP: &str = "IP";
 const ENV_SERVER_PORT: &str = "PORT";
 const ENV_API_KEY: &str = "API_KEY";
 const ENV_LOG_LEVEL: &str = "RUST_LOG";
+const ENV_WORKER_PORT: &str = "WORKER_PORT";
 
 #[derive(Debug, thiserror::Error)]
 enum AppError {
@@ -199,10 +200,47 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(3000);
 
+    let worker_port = std::env::var(ENV_WORKER_PORT)
+        .ok()
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(3001);
+
+    // Start Node.js WASM worker as a child process
+    // Look for wasm-worker.js relative to current working directory (project root)
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    // Check for wasm-worker.js in the project root
+    let wasm_worker_path = current_dir.join("wasm-worker.js");
+
+    let worker_child = if wasm_worker_path.exists() {
+        info!("Starting WASM worker from: {}", wasm_worker_path.display());
+
+        // Also set WASM_PATH and MODEL_DIR to point to project directories
+        let wasm_dir = current_dir.join("wasm");
+        let models_path = models_dir.to_string_lossy().to_string();
+
+        let child = tokio::process::Command::new("node")
+            .arg(wasm_worker_path.display().to_string())
+            .env("WORKER_PORT", worker_port.to_string())
+            .env("MODEL_DIR", models_path)
+            .env("WASM_PATH", wasm_dir.join("bergamot-translator.wasm").display().to_string())
+            .env("JS_PATH", wasm_dir.join("bergamot-translator.js").display().to_string())
+            .kill_on_drop(true)
+            .spawn()
+            .context("Failed to spawn WASM worker")?;
+        Some(child)
+    } else {
+        warn!("wasm-worker.js not found at {}, translation may fail", wasm_worker_path.display());
+        None
+    };
+
+    // Give the worker a moment to start
+    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+
     let server_address = format!("{}:{}", server_ip, server_port);
 
-    info!("Initializing translator with {} workers", num_workers);
-    let translator = Translator::new(num_workers).await.context("Failed to initialize translator")?;
+    info!("Initializing translator with {} workers (worker port: {})", num_workers, worker_port);
+    let translator = translation::Translator::new(num_workers, worker_port).await.context("Failed to initialize translator")?;
 
     info!("Loading translation models from {}", models_dir.display());
     let models = load_models_manually(&translator, &models_dir)

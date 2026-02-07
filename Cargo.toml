@@ -8,6 +8,7 @@ default-run = "linguaspark-server"
 anyhow = "1"
 axum = "0.8"
 isolang = "2"
+reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -16,13 +17,6 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 whichlang = "0.1"
-rquickjs = { version = "0.6", features = ["full", "futures", "parallel"] }
-wasmtime = "29.0"
-wasmparser = "0.221"
-
-# WASM-compatible Bergamot translator for cross-platform support
-# Using local WASM files (bergamot-translator.wasm) instead of native C++ bindings
-# bergamot-translator = "0.6"
 
 [profile.release]
 strip = true
