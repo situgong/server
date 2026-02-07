@@ -4,69 +4,22 @@
  * Downloads the latest Bergamot translation models from Mozilla's server
  *
  * Usage:
- *   node download-models.js                    # Download en-zh and en-ja
- *   node download-models.js --model en-zh    # Download specific model
- *   node download-models.js --list           # List available models
- *   node download-models.js --dir ./models   # Specify output directory
+ *   node download-models.js                    # Download all configured models
+ *   node download-models.js --model en-zh      # Download specific model
+ *   node download-models.js --list            # List available models
+ *   node download-models.js --dir ./models    # Specify output directory
  */
 
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createWriteStream } from 'fs';
-import { pipeline } from 'stream/promises';
-import https from 'https';
-import http from 'http';
 import { spawn } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Mozilla's translation data CDN
-const BASE_URL = 'https://storage.googleapis.com/moz-fx-translations-data--303e-prod-translations-data';
-
-// Model configurations - uses known file patterns from Mozilla
-const MODEL_CONFIGS = {
-    'en-zh': {
-        name: 'English → Chinese',
-        prefix: 'enzh',
-        files: [
-            { name: 'model.enzh.intgemm8.bin', key: 'model' },
-            { name: 'lex.50.50.enzh.s2t.bin', key: 'lex' },
-            { name: 'srcvocab.enzh.spm', key: 'srcVocab' },
-            { name: 'trgvocab.enzh.spm', key: 'trgVocab' }
-        ]
-    },
-    'en-ja': {
-        name: 'English → Japanese',
-        prefix: 'enja',
-        files: [
-            { name: 'model.enja.intgemm8.bin', key: 'model' },
-            { name: 'lex.50.50.enja.s2t.bin', key: 'lex' },
-            { name: 'srcvocab.enja.spm', key: 'srcVocab' },
-            { name: 'trgvocab.enja.spm', key: 'trgVocab' }
-        ]
-    },
-    'zh-en': {
-        name: 'Chinese → English',
-        prefix: 'zhen',
-        files: [
-            { name: 'model.zhen.intgemm8.bin', key: 'model' },
-            { name: 'lex.50.50.zhen.s2t.bin', key: 'lex' },
-            { name: 'srcvocab.zhen.spm', key: 'srcVocab' },
-            { name: 'trgvocab.zhen.spm', key: 'trgVocab' }
-        ]
-    },
-    'en-ko': {
-        name: 'English → Korean',
-        prefix: 'enko',
-        files: [
-            { name: 'model.enko.intgemm8.bin', key: 'model' },
-            { name: 'lex.50.50.enko.s2t.bin', key: 'lex' },
-            { name: 'srcvocab.enko.spm', key: 'srcVocab' },
-            { name: 'trgvocab.enko.spm', key: 'trgVocab' }
-        ]
-    }
-};
+// Configuration
+const MODELS_JSON_URL = 'https://storage.googleapis.com/moz-fx-translations-data--303e-prod-translations-data/db/models.json';
+const OUTPUT_DIR = process.env.MODEL_DIR || './models';
 
 // CLI args
 const args = process.argv.slice(2);
@@ -75,33 +28,40 @@ const dirArg = args.find(a => a.startsWith('--dir='))?.split('=')[1];
 const listMode = args.includes('--list');
 const helpMode = args.includes('--help') || args.includes('-h');
 
-const targetDir = dirArg || './models';
+const targetDir = dirArg || OUTPUT_DIR;
 const targetModel = modelArg;
 
-// Download helper using curl (more reliable on Windows)
-async function downloadFile(url, destPath) {
-    return new Promise((resolve, reject) => {
-        const proc = spawn('curl', ['-fsSL', '-C', '-', '-o', destPath, url], {
-            stdio: ['ignore', 'pipe', 'pipe']
-        });
+// Download using curl with retry
+async function downloadFile(url, destPath, retries = 3) {
+    // Ensure parent directory exists
+    await fs.mkdir(path.dirname(destPath), { recursive: true });
 
-        let stdout = '';
-        let stderr = '';
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await new Promise((resolve, reject) => {
+                const proc = spawn('curl', ['-fsSL', '-C', '-', '-o', destPath, url], {
+                    stdio: 'ignore'
+                });
 
-        proc.stdout.on('data', d => stdout += d);
-        proc.stderr.on('data', d => stderr += d);
-
-        proc.on('close', (code) => {
-            if (code === 0) {
-                console.log(`  Downloaded: ${path.basename(destPath)}`);
-                resolve();
+                proc.on('close', (code) => {
+                    if (code === 0) {
+                        console.log(`  Downloaded: ${path.basename(destPath)}`);
+                        resolve();
+                    } else {
+                        reject(new Error(`curl failed (exit ${code})`));
+                    }
+                });
+                proc.on('error', reject);
+            });
+        } catch (err) {
+            if (i < retries - 1) {
+                console.log(`  Retry ${i + 2}/${retries}...`);
+                await new Promise(r => setTimeout(r, 2000));
             } else {
-                reject(new Error(`curl failed (${code}): ${stderr}`));
+                throw err;
             }
-        });
-
-        proc.on('error', reject);
-    });
+        }
+    }
 }
 
 // Decompress gzip
@@ -111,52 +71,87 @@ async function decompressFile(filePath) {
         const gunzip = zlib.createGunzip();
         const input = fs.createReadStream(filePath);
         const output = fs.createWriteStream(filePath.replace(/\.gz$/, ''));
-        await pipeline(input, gunzip, output);
+        await new Promise((resolve, reject) => {
+            pipeline(input, gunzip, output, err => err ? reject(err) : resolve());
+        });
         await fs.unlink(filePath);
         console.log(`  Decompressed: ${path.basename(filePath).replace(/\.gz$/, '')}`);
     }
 }
 
+// Fetch and parse models.json
+async function getModelUrls() {
+    console.log('Fetching models metadata...');
+    const tempFile = path.join(__dirname, 'temp-models.json');
+    await downloadFile(MODELS_JSON_URL, tempFile);
+    const content = await fs.readFile(tempFile, 'utf-8');
+    await fs.unlink(tempFile);
+    return JSON.parse(content);
+}
+
 // List available models
-function listModels() {
+async function listModels() {
+    const data = await getModelUrls();
+    const baseUrl = data.baseUrl;
+
     console.log('\nAvailable models:\n');
-    for (const [key, config] of Object.entries(MODEL_CONFIGS)) {
-        console.log(`  ${key} - ${config.name}`);
+    console.log(`Generated: ${data.generated}`);
+    console.log(`Base URL: ${baseUrl}\n`);
+
+    const available = Object.keys(data.models).filter(k =>
+        ['en-zh', 'en-ja', 'zh-en', 'en-ko', 'ja-en', 'ko-en', 'en-de', 'de-en', 'en-fr', 'fr-en'].includes(k)
+    );
+
+    for (const key of available) {
+        const model = data.models[key][0];
+        const arch = model.architecture;
+        console.log(`  ${key} - ${model.sourceLanguage} → ${model.targetLanguage} (${arch})`);
     }
     console.log('');
 }
 
 // Download a single model
-async function downloadModel(modelKey) {
-    const config = MODEL_CONFIGS[modelKey];
-    if (!config) {
-        throw new Error(`Unknown model: ${modelKey}`);
+async function downloadModel(modelKey, baseUrl, modelData) {
+    if (!modelData[modelKey] || modelData[modelKey].length === 0) {
+        throw new Error(`Model ${modelKey} not found in registry`);
     }
 
+    const model = modelData[modelKey][0];
+    const files = model.files;
+
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`Downloading: ${config.name} (${modelKey})`);
+    console.log(`Downloading: ${model.sourceLanguage} → ${model.targetLanguage} (${model.architecture})`);
     console.log(`${'='.repeat(60)}\n`);
 
     const modelDir = path.join(targetDir, modelKey);
     await fs.mkdir(modelDir, { recursive: true });
 
-    for (const file of config.files) {
-        const url = `${BASE_URL}/${modelKey}/${file.name}.gz`;
-        const destPath = path.join(modelDir, file.name);
+    // Map file keys to download
+    const fileMapping = {
+        'lexicalShortlist': `${modelKey}/lex.bin`,
+        'model': `${modelKey}/model.bin`,
+        'srcVocab': `${modelKey}/srcvocab.spm`,
+        'trgVocab': `${modelKey}/trgvocab.spm`,
+        'vocab': `${modelKey}/vocab.spm`  // Some models use 'vocab' instead of srcVocab/trgVocab
+    };
 
-        console.log(`  Fetching: ${file.name}...`);
+    for (const [key, filename] of Object.entries(fileMapping)) {
+        if (!files[key]) {
+            console.log(`  Skipping: ${key} (not available)`);
+            continue;
+        }
+
+        const filePath = files[key].path;
+        const destPath = path.join(modelDir, filename);
+
+        console.log(`  Fetching: ${filename}...`);
+        const url = `${baseUrl}/${filePath}`;
+
         try {
             await downloadFile(url, destPath);
             await decompressFile(destPath);
         } catch (err) {
-            // Try without .gz extension
-            const url2 = `${BASE_URL}/${modelKey}/${file.name}`;
-            console.log(`  Trying: ${file.name} (no gzip)...`);
-            try {
-                await downloadFile(url2, destPath);
-            } catch (err2) {
-                console.log(`  Skipping: ${file.name} (not found)`);
-            }
+            console.log(`  Failed: ${err.message}`);
         }
     }
 
@@ -179,10 +174,10 @@ Options:
   --help, -h      Show this help
 
 Examples:
-  node download-models.js                    # Download en-zh and en-ja
-  node download-models.js --model=en-zh     # Download only en-zh
-  node download-models.js --list            # Show available models
-  node download-models.js --dir=./my-models # Custom output dir
+  node download-models.js                    # Download all models
+  node download-models.js --model=en-zh       # Download only en-zh
+  node download-models.js --list              # Show available models
+  node download-models.js --dir=./my-models  # Custom output dir
 
 Environment:
   MODEL_DIR         Override default output directory
@@ -191,27 +186,34 @@ Environment:
     }
 
     if (listMode) {
-        listModels();
+        await listModels();
         process.exit(0);
     }
 
+    // Fetch models metadata
+    const data = await getModelUrls();
+    const baseUrl = data.baseUrl;
+
+    // Determine models to download
     const modelsToDownload = targetModel
         ? [targetModel]
-        : ['en-zh', 'en-ja'];
+        : ['en-zh', 'en-ja'];  // Default models
 
-    console.log(`Output directory: ${path.resolve(targetDir)}`);
+    console.log(`\nOutput directory: ${path.resolve(targetDir)}`);
     console.log(`Models: ${modelsToDownload.join(', ')}\n`);
 
     for (const model of modelsToDownload) {
         try {
-            await downloadModel(model);
+            await downloadModel(model, baseUrl, data.models);
         } catch (err) {
-            console.error(`Failed: ${err.message}`);
+            console.error(`Failed to download ${model}: ${err.message}`);
             process.exit(1);
         }
     }
 
-    console.log('\nDone!');
+    console.log('\n' + '='.repeat(60));
+    console.log('All models downloaded successfully!');
+    console.log(`\nTo use: Set MODELS_DIR=${path.resolve(targetDir)} or restart server`);
 }
 
 main().catch(err => {
