@@ -1,7 +1,7 @@
 # LinguaSpark Translation Service - Docker Image
 # Uses Node.js with Bergamot WASM translator
 
-FROM node:20-bookworm-slim
+FROM node:25.6.0-bookworm-slim
 
 WORKDIR /app
 
