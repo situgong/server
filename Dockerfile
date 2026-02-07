@@ -1,27 +1,37 @@
-FROM rust:bookworm AS builder
+# LinguaSpark Translation Service - Docker Image
+# Uses Node.js with Bergamot WASM translator
+
+FROM node:20-bookworm-slim
 
 WORKDIR /app
-COPY . .
 
-RUN cargo build --release
+# Install dependencies
+COPY package*.json ./
+RUN npm ci --only=production
 
-RUN mkdir -p /app/lib && \
-    find /app/target/release/build -name "linguaspark-*" -type d | xargs -I {} find {} -path "*/out/*.so" -type f | xargs -I {} cp {} /app/lib/ && \
-    ls -l /app/lib
+# Copy application files
+COPY server.js ./
+COPY wasm/ ./wasm/
 
-FROM debian:bookworm-slim
+# Create models directory
+RUN mkdir -p /app/models
 
-WORKDIR /app
-COPY --from=builder /app/target/release/linguaspark-server /app/linguaspark-server
-COPY --from=builder /app/lib/*.so /lib/x86_64-linux-gnu/
-
-ENV MODELS_DIR=/app/models
-ENV NUM_WORKERS=1
+# Environment variables
+ENV NODE_ENV=production
 ENV IP=0.0.0.0
 ENV PORT=3000
-# ENV ENV_API_KEY=
-ENV RUST_LOG=info
+ENV MODELS_DIR=/app/models
+ENV WASM_PATH=wasm/bergamot-translator.wasm
+ENV JS_PATH=wasm/bergamot-translator.js
 
+# Expose port
 EXPOSE 3000
 
-ENTRYPOINT ["/app/linguaspark-server"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+
+# Run as non-root user
+USER node
+
+ENTRYPOINT ["node", "server.js"]
