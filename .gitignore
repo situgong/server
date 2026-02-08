@@ -2,9 +2,12 @@
 /.cargo_local
 /.cargo_local/**
 Cargo.lock
-Cargo.lock
 /node_modules
 /node_modules/**
 /test-models
 /test-models/**
 nul
+/logs
+/models;C
+.port_output.txt
+18
