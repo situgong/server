@@ -34,12 +34,18 @@ echo   URL: http://127.0.0.1:3000
 echo   Docs: http://127.0.0.1:3000/docs/
 echo   Monitor: http://127.0.0.1:3000/monitor.html
 echo.
+
+REM Create logs directory if not exists
+if not exist "%~dp0logs" mkdir "%~dp0logs"
+
+REM Start server in background with logs
+cd /d "%~dp0"
+start /B node server.js >> logs\server.log 2>&1
+
 echo ============================================
-echo   Server logs (Ctrl+C to stop):
+echo   Server started in background
+echo   Logs: %~dp0logs\server.log
 echo ============================================
 echo.
-
-cd /d "%~dp0"
-node server.js
-
-pause
+echo Press any key to exit...
+pause >nul
