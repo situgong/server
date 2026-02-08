@@ -1,13 +1,13 @@
 @echo off
 chcp 65001 >nul
-setlocal
+setlocal enabledelayedexpansion
 
 REM ============================================
 REM LinguaSpark Server Stop Script
 REM ============================================
 
-set "SCRIPT_DIR=%~dp0"
 set "PORT=3000"
+set "FOUND=0"
 
 echo ============================================
 echo   LinguaSpark Server - Stop
@@ -23,13 +23,18 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%PORT% " ^| findstr "LISTEN
     ) else (
         echo   ERROR: Failed to stop process
     )
-    goto done
+    set "FOUND=1"
 )
 
-echo   Server was not running
+if "%FOUND%"=="0" (
+    echo   Server was not running
+)
 
-:done
+echo.
 echo ============================================
-pause
+echo   Done. Press any key to exit...
+echo ============================================
+pause >nul
+
 endlocal
 exit /b 0

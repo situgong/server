@@ -28,9 +28,8 @@ echo   OK: Node.js %NODE_VERSION% found
 
 REM Check Node.js version
 echo [2/4] Checking Node.js version...
-for /f "tokens=2 delims=v" %%v in ("%NODE_VERSION%") do set "MAJOR=%%v"
-for /f "tokens=1 delims=." %%m in ("%MAJOR%") do set "MAJOR=%%m"
-if %MAJOR% lss 18 (
+for /f "tokens=2 delims=v." %%v in ("%NODE_VERSION%") do set "MAJOR=%%v"
+if "%MAJOR%" lss "18" (
     echo   ERROR: Node.js version must be >= 18 (current: %NODE_VERSION%)
     goto wait_exit
 )
@@ -78,6 +77,7 @@ echo.
 cd /d "%SCRIPT_DIR%"
 node server.js
 
+:wait_exit
 pause
 endlocal
-exit /b 0
+exit /b %ERRORLEVEL%
