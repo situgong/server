@@ -8,3 +8,5 @@ Cargo.lock
 /test-models
 /test-models/**
 nul
+/logs
+/models;C
