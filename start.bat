@@ -13,17 +13,17 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-for /f "tokens=*" %%i in ('node --version') do set NODE_VERSION=%%i
-echo   OK: Node.js %NODE_VERSION% found
+for /f "delims=" %%i in ('node --version') do echo   OK: Node.js %%i found
 
 echo [2/4] Checking Node.js version...
-for /f "tokens=2 delims=v." %%v in ("%NODE_VERSION%") do set MAJOR=%%v
-if "%MAJOR%" lss "18" (
+node -e "if (parseInt(process.version.slice(1).split('.')[0]) < 18) process.exit(1)"
+if not errorlevel 1 (
+    echo   OK: Node.js version is >= 18
+) else (
     echo   ERROR: Node.js must be >= 18
     pause
     exit /b 1
 )
-echo   OK: Node.js version is >= 18
 
 echo [3/4] Checking for existing instances...
 echo   OK: Proceeding...
