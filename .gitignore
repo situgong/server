@@ -5,7 +5,6 @@ Cargo.lock
 Cargo.lock
 /node_modules
 /node_modules/**
-package-lock.json
 /test-models
 /test-models/**
 nul
