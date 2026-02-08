@@ -1,6 +1,5 @@
 @echo off
 chcp 65001 >nul
-setlocal enabledelayedexpansion
 
 REM ============================================
 REM LinguaSpark Server Stop Script
@@ -32,9 +31,6 @@ if "%FOUND%"=="0" (
 
 echo.
 echo ============================================
-echo   Done. Press any key to exit...
+echo   Done.
 echo ============================================
-pause >nul
-
-endlocal
-exit /b 0
+pause
