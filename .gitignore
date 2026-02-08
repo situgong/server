@@ -2,7 +2,6 @@
 /.cargo_local
 /.cargo_local/**
 Cargo.lock
-Cargo.lock
 /node_modules
 /node_modules/**
 /test-models
